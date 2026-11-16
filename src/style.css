@@ -3,7 +3,7 @@
   color: #244e43;
   --accent: #298467;
   --panel: #fafaf2;
-  --muted: #728c79;
+  --muted: #496b5a;
   --line: #dfe5d5;
 }
 * { box-sizing: border-box; }
@@ -19,13 +19,13 @@ button:disabled { opacity: .5; cursor: default; }
 button svg { width: 22px; height: 22px; flex-shrink: 0; }
 [hidden] { display: none !important; }
 canvas { position: fixed; inset: 0; display: block; touch-action: none; }
-.masthead { position: fixed; z-index: 10; top: 24px; left: 50%; transform: translateX(-50%); width: min(900px, calc(100% - 80px)); min-height: 78px; padding: 12px 18px 12px 26px; border-radius: 22px; display: flex; align-items: center; gap: 26px; background: var(--panel); box-shadow: 0 6px 0 #ffffff2b, 0 8px 32px #2a48330b; }
+.masthead { position: fixed; z-index: 10; top: 24px; left: 50%; transform: translateX(-50%); width: min(900px, calc(100% - 80px)); min-height: 78px; padding: 12px 18px 12px 26px; border-radius: 22px; display: flex; align-items: center; gap: 26px; background: var(--panel); box-shadow: 0 8px 28px #244e431a; }
 .brand { display: flex; align-items: center; gap: 13px; text-decoration: none; color: inherit; flex-shrink: 0; }
 .brandMark { font-size: 54px; line-height: .75; font-weight: 900; letter-spacing: -7px; color: var(--accent); position: relative; width: 43px; }
 .brandMark > span { position: absolute; font-size: 27px; color: #eeaa68; top: 0; right: -2px; }
 .brandName { font-size: 18px; letter-spacing: -.4px; display: block; white-space: nowrap; }
 .brandName b { font-weight: 800; }
-.brandTagline { display: block; font-size: 7px; letter-spacing: 2.2px; margin-top: 5px; color: var(--muted); }
+.brandTagline { display: block; font-size: 10px; letter-spacing: 2.2px; margin-top: 5px; color: var(--muted); }
 .exploring { display: flex; align-items: center; gap: 8px; border-left: 1px solid var(--line); padding-left: 25px; font-size: 11px; color: var(--muted); flex: 1; min-width: 0; }
 .exploring span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .exploring i { width: 6px; height: 6px; border-radius: 50%; background: #68a17d; flex-shrink: 0; }
@@ -36,7 +36,7 @@ canvas { position: fixed; inset: 0; display: block; touch-action: none; }
 h1 { margin: 0 0 13px; font-size: 42px; line-height: 1.05; font-weight: 750; letter-spacing: -1.7px; }
 .titleAccent { color: #e8a367; }
 #placeDescription { max-width: 225px; font-size: 12px; line-height: 1.9; margin: 0; }
-.country { display: flex; align-items: center; gap: 8px; font-size: 6px; font-weight: 650; letter-spacing: 1.5px; margin-top: 23px; }
+.country { display: flex; align-items: center; gap: 8px; font-size: 10px; font-weight: 650; letter-spacing: 1.5px; margin-top: 23px; }
 .flag { display: inline-block; width: 20px; height: 13px; border-radius: 2px; background: linear-gradient(#e6534c 0 25%, #4e6e9f 25% 50%, #f4d569 50% 75%, #64a563 75%); }
 .mapTools { position: fixed; right: 24px; top: 148px; z-index: 8; width: 50px; padding: 7px 0; border-radius: 16px; background: var(--panel); box-shadow: 0 4px 0 #ffffff35; display: flex; flex-direction: column; align-items: center; }
 .mapTools button { background: transparent; border: 0; padding: 10px; width: 44px; height: 40px; display: grid; place-items: center; color: #507963; }
@@ -73,12 +73,12 @@ input[type="checkbox"] { accent-color: var(--accent); }
 .helpPanel { position: fixed; z-index: 15; right: max(40px, calc((100vw - 900px) / 2)); top: 118px; width: min(330px, calc(100% - 32px)); padding: 24px; border-radius: 18px; background: var(--panel); box-shadow: 0 16px 50px #254e4326; }
 .helpPanel p { font-size: 12px; line-height: 1.8; color: var(--muted); }
 .destinationDock { position: fixed; z-index: 10; bottom: 30px; left: 50%; transform: translateX(-50%); width: min(790px, calc(100% - 80px)); padding: 18px; border-radius: 22px; background: var(--panel); box-shadow: 0 10px 35px #254e4310; }
-.dockHeading { display: flex; justify-content: space-between; gap: 12px; margin: 0 2px 12px; font-size: 6px; font-weight: 650; letter-spacing: 1.4px; color: #56896d; }
-.gestureHint { font-size: 5px; letter-spacing: 1px; }
+.dockHeading { display: flex; justify-content: space-between; gap: 12px; margin: 0 2px 12px; font-size: 10px; font-weight: 650; letter-spacing: 1.4px; color: #56896d; }
+.gestureHint { font-size: 9px; letter-spacing: 1px; }
 .destinationCards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .destinationCard { min-height: 62px; padding: 12px 14px; display: flex; align-items: center; gap: 13px; text-align: left; }
 .destinationCard b { font-size: 13px; font-weight: 600; white-space: nowrap; }
-.destinationCard small { display: block; margin-top: 5px; font-size: 7px; font-weight: 400; color: #8b9f83; white-space: nowrap; }
+.destinationCard small { display: block; margin-top: 5px; font-size: 10px; font-weight: 400; color: #4b6a58; white-space: nowrap; }
 .destinationIcon { display: flex; }
 .destinationIcon svg { width: 27px; height: 29px; }
 .grandBaie { color: #e18255; }
@@ -114,7 +114,7 @@ body.night .placePin { background: #fffef5; }
   .brand { gap: 10px; }
   .brandMark { font-size: 45px; width: 35px; }
   .brandName { font-size: 13px; }
-  .brandTagline { font-size: 5px; letter-spacing: 1.4px; }
+  .brandTagline { font-size: 9px; letter-spacing: 1.4px; }
   .brandMark > span { font-size: 23px; }
   .exploring { display: none; }
   .islandButton { margin-left: auto; min-height: 40px; width: 40px; padding: 9px; }
@@ -122,25 +122,25 @@ body.night .placePin { background: #fffef5; }
   .islandButton::after { content: none; }
   .helpButton { width: 30px; height: 30px; }
   .placeIntro { top: 105px; left: 21px; width: 205px; }
-  .eyebrow { font-size: 7px; margin-bottom: 10px; }
+  .eyebrow { font-size: 10px; margin-bottom: 10px; }
   h1 { font-size: 33px; margin-bottom: 9px; }
   #placeDescription { font-size: 10px; line-height: 1.7; max-width: 184px; }
-  .country { font-size: 5px; margin-top: 14px; }
+  .country { font-size: 9px; margin-top: 14px; }
   .mapTools { right: 14px; top: 107px; width: 44px; border-radius: 14px; }
   .mapTools button { height: 38px; width: 40px; }
   .layersToggle { right: 14px; top: 334px; }
   .hud { top: 89px; left: 12px; right: 12px; width: auto; max-height: calc(100dvh - 285px); padding: 18px; }
   .helpPanel { top: 89px; right: 12px; max-height: calc(100dvh - 290px); overflow: auto; }
   .destinationDock { bottom: 38px; width: calc(100% - 24px); padding: 13px; border-radius: 18px; }
-  .dockHeading { font-size: 5px; letter-spacing: 1px; margin-bottom: 10px; }
+  .dockHeading { font-size: 9px; letter-spacing: 1px; margin-bottom: 10px; }
   .gestureHint { display: none; }
   .destinationCards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
   .destinationCard { min-height: 53px; padding: 8px 12px; gap: 12px; }
   .destinationCard b { font-size: 12px; }
-  .destinationCard small { font-size: 6px; margin-top: 3px; }
+  .destinationCard small { font-size: 10px; margin-top: 3px; }
   .destinationIcon svg { width: 23px; height: 25px; }
   .status { left: 15px; right: 15px; bottom: 23px; font-size: 8px; }
-  .attribution { bottom: 5px; right: 12px; font-size: 7px; }
+  .attribution { bottom: 5px; right: 12px; font-size: 10px; }
   .placePopover { bottom: 208px; width: max-content; font-size: 10px; }
 }
 @media (max-height: 550px) and (min-width: 601px) {
@@ -152,4 +152,69 @@ body.night .placePin { background: #fffef5; }
   .dockHeading { margin-bottom: 7px; }
   .destinationCard { min-height: 45px; }
   .hud, .helpPanel { top: 80px; max-height: calc(100dvh - 188px); }
+}
+
+/* Recovery pass: the scene is the hero; navigation and service state remain legible. */
+::selection { background: #298467; color: #fffef5; }
+:root { scrollbar-color: #728c79 #fafaf2; }
+canvas { cursor: grab; }
+canvas:active { cursor: grabbing; }
+canvas:focus-visible { outline: 3px solid #298467; outline-offset: -4px; }
+.placeIntro { padding: 18px 20px; width: 280px; background: var(--panel); border-radius: 16px; box-shadow: 0 8px 26px #244e4312; }
+h1 { font-size: 42px; letter-spacing: -.035em; margin: 0 0 10px; line-height: 1.08; }
+#placeDescription { font-size: 13px; line-height: 1.6; }
+.navigationHint { font-size: 12px; font-weight: 650; margin: 18px 0 0; }
+.country { font-size: 9px; letter-spacing: .08em; }
+#exploreNearest { pointer-events: auto; margin-top: 12px; min-height: 44px; width: 100%; font-size: 13px; }
+.helpButton, .iconButton { min-width: 44px; min-height: 44px; }
+.mapTools { width: 56px; padding: 5px; top: 164px; }
+.mapTools button { width: 46px; height: 46px; }
+.layersToggle { top: 430px; min-height: 44px; font-size: 12px; }
+.islandButton { min-height: 48px; }
+.destinationDock { bottom: 28px; padding: 16px; }
+.dockHeading { font-size: 12px; letter-spacing: 0; color: inherit; }
+.gestureHint { font-size: 10px; letter-spacing: .03em; color: var(--muted); }
+.destinationCard small { font-size: 10px; }
+.statusBar { position: fixed; bottom: 162px; left: 24px; z-index: 9; display: flex; align-items: center; gap: 10px; max-width: min(550px, calc(100% - 110px)); padding: 10px 14px; border-radius: 12px; background: var(--panel); box-shadow: 0 4px 18px #244e4312; }
+.status { position: static; font-size: 12px; color: inherit; line-height: 1.5; white-space: normal; overflow: visible; }
+#retry { flex-shrink: 0; min-height: 44px; font-weight: 650; }
+.attribution { font-size: 10px; background: var(--panel); }
+.placePin { min-width: 44px; min-height: 44px; box-shadow: 0 3px 10px #244e4326; }
+.placePin::after { left: 17px; }
+.townPin { width: auto; padding: 10px 14px; border-radius: 12px; font-size: 14px; font-weight: 650; white-space: nowrap; color: #244e43; }
+.townPin::after { left: calc(50% - 5px); }
+.helpPanel p, .accuracy { font-size: 12px; }
+.hud label, .checkRow, .controlLine, .paletteButton, select, .buttonRow button { font-size: 12px; }
+.checkRow label { min-height: 44px; }
+.hud input[type=range] { min-height: 24px; }
+body.night .attribution { color: #e4f3e8; }
+@media (max-width: 600px) {
+  .masthead { gap: 8px; padding: 8px 12px; }
+  .brandTagline { display: none; }
+  .brandName { font-size: 12px; }
+  .islandButton { width: 44px; min-width: 44px; min-height: 44px; }
+  .placeIntro { top: 92px; left: 12px; width: calc(100% - 88px); padding: 14px 16px; }
+  h1 { font-size: 30px; margin: 0; }
+  #placeDescription, .country { display: none; }
+  .navigationHint { margin: 8px 0 0; font-size: 11px; }
+  .mapTools { top: 92px; right: 12px; width: 52px; padding: 4px; }
+  .mapTools button { width: 44px; height: 44px; }
+  .layersToggle { top: 350px; right: 12px; padding: 10px; }
+  .destinationDock { bottom: 28px; padding: 12px; }
+  .dockHeading { font-size: 12px; margin-bottom: 10px; }
+  .destinationCard { min-height: 56px; padding: 8px; gap: 10px; }
+  .destinationCard small { font-size: 9px; }
+  .statusBar { bottom: 210px; left: 12px; max-width: calc(100% - 24px); padding: 8px 12px; }
+  .status { font-size: 11px; }
+  .attribution { bottom: 5px; font-size: 9px; }
+  .hud, .helpPanel { max-height: calc(100dvh - 320px); }
+  .placePopover { bottom: 270px; }
+}
+@media (max-height: 550px) and (min-width: 601px) {
+  .placeIntro { top: 85px; padding: 12px; width: 235px; }
+  #placeDescription, .country { display: none; }
+  h1 { font-size: 28px; }
+  .mapTools { top: 82px; }
+  .layersToggle { top: 348px; }
+  .statusBar { bottom: 143px; max-width: 420px; }
 }

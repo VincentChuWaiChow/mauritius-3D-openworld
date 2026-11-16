@@ -72,13 +72,14 @@ export class TerrainCache {
   }
 
   async prime(mapTiles, zoom) {
-    this.level = zoom >= 14 ? 12 : 10;
+    const level = zoom >= 14 ? 12 : 10;
+    this.level = level;
     const parents = new Map();
     for (const tile of mapTiles) {
-      const divisor = 2 ** (zoom - this.level);
+      const divisor = 2 ** (zoom - level);
       const x = Math.floor(tile.x / divisor);
       const y = Math.floor(tile.y / divisor);
-      parents.set(this.key(this.level, x, y), [x, y]);
+      parents.set(this.key(level, x, y), [x, y]);
     }
     const tasks = [...parents.values()];
     let cursor = 0;
@@ -86,7 +87,7 @@ export class TerrainCache {
     const worker = async () => {
       while (cursor < tasks.length) {
         const [x, y] = tasks[cursor++];
-        if (await this.load(this.level, x, y)) succeeded++;
+        if (await this.load(level, x, y)) succeeded++;
       }
     };
     await Promise.all(Array.from({ length: Math.min(4, tasks.length) }, worker));

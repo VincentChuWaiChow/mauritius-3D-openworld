@@ -1,90 +1,76 @@
-# Mauritius Open World — textured Three.js source
+# Mauritius Life — a little world to explore
 
-A run-ready **Vite + Three.js** source project rendering all regions of Mauritius in an explorable 3D map. It uses OpenStreetMap tiles and building outlines, Mapzen/AWS public elevation tiles for real terrain relief, and original photo-inspired procedural texture atlases for surfaces and buildings.
+A **Vite + Three.js** illustrated map of Mauritius. Port Louis, Grand Baie, Mahébourg and Tamarin use bundled real OpenStreetMap footprints, roads and coastline. These four scenes do not depend on live Overpass, raster or elevation services. Other destinations retain the live-map mode.
 
 **Website:** [Explore Mauritius in 3D](https://VincentChuWaiChow.github.io/mauritius-3D-openworld/)
+Local source changes are not live until separately deployed.
 
-## Quick start
+## Run locally
 
-Requires Node.js 20.19+ or 22.12+, npm, WebGL2 in the browser, and internet access for OSM, public elevation and optional Overpass data.
+Requires Node.js 20.19+ or 22.12+, npm and a WebGL2-capable browser.
 
 ```bash
 npm ci
 npm run dev
-```
-
-Open the Vite URL displayed in the terminal, normally `http://localhost:5173/mauritius-3D-openworld/`.
-
-```bash
 npm test
 npm run build
 npm run preview
 ```
 
-## GitHub Pages
+Open the Vite URL, normally `http://localhost:5173/mauritius-3D-openworld/`.
+Featured scenes need access to this app’s own assets, not third-party APIs. They are **not** an installed offline/PWA experience. Other locations require the public map, elevation and building services.
 
-In [repository Settings → Pages](https://github.com/VincentChuWaiChow/mauritius-3D-openworld/settings/pages),
-set **Build and deployment → Source → GitHub Actions** once.
-The [deployment workflow](.github/workflows/deploy-pages.yml) then tests, builds,
-and publishes `dist/` on each push to `master`. It can also be run manually from
-the repository's **Actions** tab. The site becomes available at the website link
-above after the first successful deployment.
+## Explore
 
-`vite.config.js` sets the `/mauritius-3D-openworld/` project path, including local
-textures. If the repository is renamed, update that base path and the website
-link. No application server or API keys are required; map, elevation and building
-data still require access to the external services described below.
+- **Drag / one-finger swipe:** move across the town. Arrow keys move the focused map.
+- **Right-drag / two-finger rotate:** orbit. Scroll / pinch or +/−: zoom.
+- **Whole island:** north-up overview with four labelled town pins. Pick a pin or use the destination dock to travel.
+- **Zoom out button:** returns a close-up to the island when the local zoom limit is reached.
+- **Reset:** restores the location’s framing and clears drag inertia.
+- **Layers:** additional destinations, colour palettes, building height, textures, shadows, places and PNG capture. Mountain relief applies only to live-terrain views.
 
-## Implemented features
+Town panning is bounded to the available scene; this is not a continuously streamed full-island game world. Public-service failures have a visible retry action. Featured scenes remain independent of those services.
 
-- The main island and nearby islets, Rodrigues, Agaléga and Saint Brandon; zoom into individual places including Port Louis, Grand Baie, Flic en Flac, Le Morne and the Seven Coloured Earths.
-- **3D terrain:** Terrarium DEM sampling with a dynamic 0–3× relief exaggeration control. If elevation fails, the map stays navigable with flat terrain.
-- **Surface textures:** lagoon/reef patterns, coral sand, crop rows, forest canopy, volcanic basalt, colored soil, asphalt and grassland. Raster-based color classification is approximate.
-- **Buildings:** live Overpass footprints in detailed places; PBR lit with material-dependent facade and roof textures; `roof:material` and `building:material` tags take priority when present.
-- **Rendering presets:** Tropical, Sunset, Midnight, Original OSM, plus adjustable photo-inspired texture intensity, building height exaggeration, sun shadows, orbit, pan, double-click explore and PNG capture.
-- **Textured-terrain shadows:** shadow receivers share the displaced DEM mesh, so building shadows conform to the sampled terrain rather than an arbitrary flat plane.
-- **Batched geometry:** local buildings are merged into batches for fewer GPU draw calls.
+## Data and accuracy
 
-## Material study
+The bundled extracts were built from the **2026-11-15T21:22:28Z** Geofabrik Mauritius snapshot:
+[dataset provenance and ODbL licence](public/data/README.md).
 
-![Material sheet](public/textures/material-reference-sheet.png)
+- Building footprints, road centre lines and shoreline are real OSM data, not random substitute buildings. Multipolygon building relations are not represented.
+- Featured scenes deliberately use **flat illustrated terrain**. Building heights without explicit tags, widths of roads, colours, windows and decorative trees inside mapped parks are illustrative. Data can be outdated; not for navigation or surveying.
+- Live views use up to 25 visible OSM raster tiles and public Mapzen Terrarium DEM data (z10 overview/z12 detail). Raster classification includes embedded labels and is approximate. No raster tiles are bundled or bulk-prefetched.
+- Live buildings use a deadline-bounded Overpass request. Missing, rate-limited or stalled services are reported without claiming the scene is complete.
+- Procedural texture PNGs are not photographs. See [the material study](PHOTO_REFERENCES.md).
 
-The textures are **not photos**. They are original seamless/procedural patterns based on a visual study of photographs of Mauritian coasts, crops, mountains, geology and buildings. They are shipped locally in `public/textures/` and do not need network access. See [PHOTO_REFERENCES.md](PHOTO_REFERENCES.md) for image provenance, usage restrictions and design rationale.
+## Implementation
 
 | File | Responsibility |
 |---|---|
-| `src/main.js` | Three.js renderer, OSM tile streaming, user controls, camera and lighting |
-| `src/terrain.js` | DEM tile loading, Terrarium RGB decoding, bilinear interpolation |
-| `src/map-shaders.js` | Color/pattern mixing, terrain-informed rock and coast classification, ocean shader |
-| `src/materials.js` | Texture atlases and PBR wall/roof material integration |
-| `src/buildings.js` | OSM footprint extrusion, per-face pattern selection, DEM grounding and batching |
-| `src/palettes.js` | Editable color, light and building palette presets |
-| `scripts/generate_textures.py` | Reproducible texture atlas generation, optional PIL/numpy |
-| `public/textures/*.png` | Actual bitmap textures consumed by WebGL |
+| `src/main.js` | Scene lifecycle, local/live loading, camera, markers, UI wiring |
+| `src/vector-scene.js` | Label-free coastline, roads, parks, instanced trees, coverage bounds and disposal |
+| `src/data-source.js` | Deadline/cancellation-safe JSON requests and OSM validation |
+| `src/experience.js`, `src/style.css` | Mauritius Life UI and responsive layouts |
+| `src/buildings.js`, `src/materials.js` | Footprint extrusion, batched geometry and illustrated facades |
+| `src/terrain.js`, `src/map-shaders.js` | Live DEM sampling and raster/sea shaders |
+| `src/palettes.js` | Semantic colour and lighting presets |
+| `public/data/` | Four bounded town snapshots and main-island coastline, with provenance |
+| `scripts/build-scene-data.py` | Build-only snapshot extraction from a supplied PBF; requires pyosmium |
 
-## Customize styles
+The snapshot script makes no network requests. It joins coastline segments by OSM node ID and fails rather than bridging an incomplete coast. It does not install tools or publish data. The web app has no new runtime dependency.
 
-Edit `src/palettes.js` to change global colors and weather/light settings. Modify `src/map-shaders.js` for regional blending rules and `scripts/generate_textures.py` for the texture motifs themselves. Re-run the Python script only when you edit textures; generated PNGs are already bundled and used at runtime.
+## Verification
 
-## Important accuracy constraints
+`npm test` covers data timeouts, cancellation and validation, concurrent DEM loading, snapshot integrity, geometry/disposal, palette contracts and GitHub Pages asset paths. `npm run build` creates `dist/`.
 
-1. **Not satellite photogrammetry.** Surfaces are photo-*inspired*, not photorealistic building scans or licensed photo projections.
-2. **Not vector-accurate land use.** The project recolors standard OSM raster tiles; labels are embedded in raster pixels. Sugarcane/forest/roads/beaches are classified heuristically and will be imperfect. For reliable individual field/road/landuse shapes, build a vector-tile pipeline with explicit landuse/roads polygons/lines.
-3. **DEM has finite resolution.** Terrain is sampled from public Mapzen elevation tiles (z10 island-wide, z12 locally); it is not an engineering grade ground survey. Heights are multiplied by relief exaggeration for readability.
-4. **Buildings are streamed by location**, not bundled for the whole country. Local buildings depend on a public Overpass service and may be rate-limited, incomplete or unavailable. Height and material are estimated when not explicitly mapped. Building footprints are OSM `way` objects, not multipolygon relations.
-5. **Chamarel colored-earth patch is illustrative**, centered around a photographed approximate attraction location and not the exact site boundary.
-6. **Map tile use:** only 25 standard OSM raster tiles are requested for the selected area, without bulk-prefetching. Follow the [OSM tile usage policy](https://operations.osmfoundation.org/policies/tiles/) and use hosted/self-hosted vector tiles for production scale.
+Browser evidence for this recovery is under `.workflow/ultracode/world-recovery/` (local workflow artifacts, not application assets). It exercises real bundled data with external services blocked. Software WebGL checks do not prove native-GPU frame rate or mobile-device performance; visual approval remains a human check.
 
-## Data attribution
+## Publication
 
-- © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) (OSM data is under ODbL); standard raster map tiles must follow the [OSMF tile policy](https://operations.osmfoundation.org/policies/tiles/).
-- Mapzen public terrain tiles via the [AWS Open Data Registry](https://registry.opendata.aws/terrain-tiles/). Terrarium elevation is `(R×256 + G + B/256) - 32768` meters.
-- Application code: MIT. All material PNGs here are original procedural images, not third-party photographs.
+`vite.config.js` keeps the `/mauritius-3D-openworld/` base for application, texture and snapshot URLs. The existing GitHub Actions workflow tests/builds/publishes `dist/` on pushes to `master` or manual dispatch. No server or API keys are required. Commit, push and deployment are separate actions, not part of local verification.
 
-## Test status and hardware limitation
+## Attribution
 
-`npm test` covers palette/terrain behavior and shader declarations, plus a production build that checks
-project-relative asset URLs and bundled textures. The deployment workflow requires
-these tests and `npm run build` to succeed before publishing. These checks do not
-prove GPU performance or the availability of external map/elevation/building services;
-those still require a WebGL2-enabled browser and network access.
+- © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright); bundled data is [ODbL 1.0](https://opendatacommons.org/licenses/odbl/1-0/), extracted via [Geofabrik](https://download.geofabrik.de/africa/mauritius.html).
+- Live standard tiles follow the [OSMF tile policy](https://operations.osmfoundation.org/policies/tiles/).
+- Live elevation: [Mapzen terrain via AWS Open Data](https://registry.opendata.aws/terrain-tiles/).
+- Application code: MIT. Material PNGs are original procedural textures.

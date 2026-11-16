@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { MapControls } from 'three/addons/controls/MapControls.js';
 import { PALETTES } from './palettes.js';
 import { createBuildingBatches, projectLocal, recolorBuildingBatches, rescaleBuildingBatches } from './buildings.js';
 import { TerrainCache, tileToLat, tileToLon } from './terrain.js';
@@ -8,6 +8,8 @@ import {
   mapVertexShader, mapFragmentShader, seaVertexShader, seaFragmentShader,
 } from './map-shaders.js';
 import { DESTINATIONS, DEFAULT_DESTINATION, DEFAULT_PALETTE, renderExperience, setCameraFrame } from './experience.js';
+import { fetchJSON, parseOSM } from './data-source.js';
+import { bundledKey, localBounds, createVectorScene, recolorVectorScene, disposeGroup as clearGroup } from './vector-scene.js';
 import './style.css';
 
 // Island overview uses z11: 5x5 visible raster tiles cover the main island.
@@ -23,9 +25,7 @@ let shadowEnabled = true;
 let heightScale = 2.5; // Visual exaggeration of the OSM or estimated building heights.
 let terrainRelief = 1; // Visual DEM exaggeration; each height still comes from the DEM.
 let textureStrength = 0;
-let terrainStats = { succeeded: 0, requested: 0 };
 const terrainCache = new TerrainCache();
-let tileSize = 1;
 let mapCenter = { lat: current.lat, lon: current.lon };
 
 const app = document.querySelector('#app');
@@ -37,7 +37,14 @@ const heightOutput = document.querySelector('#heightText');
 const reliefOutput = document.querySelector('#reliefText');
 const surfaceOutput = document.querySelector('#surfaceText');
 const setStatus = message => { statusEl.textContent = message; };
-let mapWarning = '';
+let vectorMode = true;
+let coverage = null;
+let coastlineData = null;
+let sceneAbort = null;
+let viewState = { map: '', buildings: '' };
+const reportState = () => setStatus([viewState.map, viewState.buildings].filter(Boolean).join(' · '));
+const sampleGround = (lat, lon) => vectorMode ? 0 : terrainCache.sample(lat, lon);
+const retryButton = document.querySelector('#retry');
 let buildingRequest = 0;
 
 const scene = new THREE.Scene();
@@ -63,12 +70,16 @@ app.appendChild(renderer.domElement);
 
 const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.5, 600000);
 let frameHeight = 1100;
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
+const controls = new MapControls(camera, renderer.domElement);
+controls.enableDamping = !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 controls.dampingFactor = 0.075;
-controls.screenSpacePanning = true;
-controls.minZoom = 0.45;
-controls.maxZoom = 12;
+controls.screenSpacePanning = false;
+renderer.domElement.tabIndex = 0;
+renderer.domElement.setAttribute('aria-label', 'Explore Mauritius map. Drag or use arrow keys to move; scroll to zoom.');
+renderer.domElement.addEventListener('pointerdown', () => renderer.domElement.focus({ preventScroll: true }));
+controls.listenToKeyEvents(renderer.domElement);
+controls.minZoom = 0.55;
+controls.maxZoom = 8;
 controls.maxPolarAngle = Math.PI * 0.49;
 
 const hemisphere = new THREE.HemisphereLight(palette.hemisphereSky, palette.hemisphereGround, palette.ambientIntensity);
@@ -87,7 +98,8 @@ scene.add(sun, sun.target);
 
 const mapGroup = new THREE.Group();
 const buildingGroup = new THREE.Group();
-scene.add(mapGroup, buildingGroup);
+const vectorGroup = new THREE.Group();
+scene.add(mapGroup, buildingGroup, vectorGroup);
 
 // Every terrain tile has a transparent receiver with the exact same relief.
 // Unlike a flat shadow plane, building shadows adhere to the ground surface.
@@ -115,6 +127,7 @@ const oceanTime = { value: 0 };
 const ocean = new THREE.Mesh(
   new THREE.PlaneGeometry(900000, 900000),
   new THREE.ShaderMaterial({
+    depthWrite: false,
     vertexShader: seaVertexShader,
     fragmentShader: seaFragmentShader,
     uniforms: {
@@ -124,6 +137,9 @@ const ocean = new THREE.Mesh(
     fog: true,
   }),
 );
+// The ocean is a backdrop, never an occluder of the nearly coplanar island.
+// This avoids depth precision cracks on large, flat overview triangles.
+ocean.renderOrder = -10;
 ocean.rotation.x = -Math.PI / 2;
 ocean.position.y = -2;
 scene.add(ocean);
@@ -147,16 +163,6 @@ function inverseProject(x, z) {
   };
 }
 
-function clearGroup(group, disposeMaterials = false) {
-  for (const child of [...group.children]) {
-    group.remove(child);
-    child.geometry?.dispose();
-    if (disposeMaterials) {
-      if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
-      else child.material?.dispose();
-    }
-  }
-}
 function clearTiles() {
   for (const tile of [...mapGroup.children]) {
     const tex = tile.material.uniforms.uMap.value;
@@ -195,6 +201,7 @@ function recolor(name) {
   buildingMaterial.emissive.set(p.buildingEmissive);
   buildingMaterial.userData.textureStrength.value = textureStrength * (name === 'midnight' ? .4 : 1);
   recolorBuildingBatches(buildingGroup, p);
+  recolorVectorScene(vectorGroup, p, shadowEnabled);
   document.querySelector('#legendWater').style.background = p.lagoon;
   document.querySelector('#legendPark').style.background = p.vegetation;
   document.querySelector('#legendRoad').style.background = p.roads;
@@ -212,7 +219,8 @@ function configureShadows(zoom) {
   for (const tile of mapGroup.children) {
     if (tile.children[0]) tile.children[0].visible = sun.castShadow;
   }
-  const span = zoom >= 14 ? 4500 : 35000;
+  recolorVectorScene(vectorGroup, palette, sun.castShadow);
+  const span = zoom >= 14 ? 2200 : 35000;
   const s = sun.shadow.camera;
   s.left = -span; s.right = span;
   s.top = span; s.bottom = -span;
@@ -275,7 +283,7 @@ function updateRelief() {
     geo.computeBoundingSphere();
   }
   rescaleBuildingBatches(buildingGroup, terrainRelief, heightScale);
-  controls.target.y = terrainCache.sample(current.lat, current.lon) * terrainRelief;
+  controls.target.y = sampleGround(current.lat, current.lon) * terrainRelief;
   controls.update();
 }
 
@@ -295,20 +303,32 @@ async function loadMapTiles(place, loadSerial) {
     }
   }
   positions.sort((a, b) => a.distance - b.distance);
-  tileSize = metersPerTile(lat, zoom);
   let cursor = 0;
   let completed = 0;
   let failed = 0;
   // Load elevation and the visible OSM raster tiles concurrently, to avoid
   // blocking the map while a terrain service is slow or unavailable.
   const terrainTask = terrainCache.prime(positions, zoom);
+  const deadline = Date.now() + 10000;
   const workers = Array.from({ length: 5 }, async () => {
     while (cursor < positions.length && loadSerial === serial) {
       const { x, y } = positions[cursor++];
+      if (Date.now() >= deadline) { failed++; completed++; continue; }
       await new Promise(resolve => {
+        let settled = false;
+        const finish = (error = false) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          if (error) failed++;
+          completed++;
+          resolve();
+        };
+        const timer = setTimeout(() => finish(true), Math.min(6000, deadline - Date.now()));
         tileLoader.load(
           `https://tile.openstreetmap.org/${zoom}/${x}/${y}.png`,
           texture => {
+            if (settled) { texture.dispose(); return; }
             if (loadSerial === serial) {
               texture.colorSpace = THREE.SRGBColorSpace;
               texture.anisotropy = Math.min(renderer.capabilities.getMaxAnisotropy(), 8);
@@ -333,100 +353,132 @@ async function loadMapTiles(place, loadSerial) {
             } else {
               texture.dispose();
             }
-            completed++;
-            resolve();
+            finish();
           },
           undefined,
-          () => { failed++; completed++; resolve(); },
+          () => finish(true),
         );
       });
     }
   });
   await Promise.all(workers);
-  terrainStats = await terrainTask;
-  if (loadSerial === serial) { rebuildTerrainTiles(place); configureShadows(zoom); }
-  return { completed, failed, terrain: terrainStats };
+  const terrain = await terrainTask;
+  if (loadSerial === serial) {
+    rebuildTerrainTiles(place);
+    // Buildings may be ready before DEM; update their ground attributes once elevation settles.
+    if (buildingsLoaded && liveElements) installBuildings(liveElements, place);
+    configureShadows(zoom);
+  }
+  return { completed, failed, terrain };
+}
+
+let liveElements = null;
+function installBuildings(elements, place) {
+  clearGroup(buildingGroup);
+  const { meshes, count } = createBuildingBatches(elements.filter(el => el.tags?.building), place, palette, buildingMaterial,
+    sampleGround, terrainRelief, heightScale);
+  buildingGroup.add(...meshes);
+  setPlaceMarkers(elements.filter(el => el.tags?.building), place);
+  buildingGroup.visible = buildingsEnabled;
+  buildingsLoaded = true;
+  renderer.domElement.dataset.buildings = String(count);
+  return count;
 }
 
 async function loadBuildings(place, loadSerial) {
   const request = ++buildingRequest;
   abortBuildings?.abort();
-  clearGroup(buildingGroup);
-  clearPlaceMarkers();
-  buildingsLoaded = false;
+  if (vectorMode) return;
   if (!buildingsEnabled || place.zoom < 14) {
-    setStatus(place.zoom < 14 ? 'Island overview ready. Select a town or double-click a point to reveal 3D buildings.'
-      : 'Map ready. Turn on 3D buildings to load local footprints.');
+    viewState.buildings = place.zoom < 14 ? 'Choose a town for 3D detail' : 'Buildings hidden';
+    reportState();
     return;
   }
-  // Keep the request aligned to visible high-detail tiles.
-  const span = place.zoom >= 15 ? 0.022 : 0.033;
-  const south = (place.lat - span).toFixed(6);
-  const west = (place.lon - span).toFixed(6);
-  const north = (place.lat + span).toFixed(6);
-  const east = (place.lon + span).toFixed(6);
-  const query = `[out:json][timeout:35];way[building](${south},${west},${north},${east});out tags geom;`;
-  setStatus(`Loading local 3D building footprints for ${place.name}…`);
+  const span = .022;
+  const query = `[out:json][timeout:10];way[building](${place.lat-span},${place.lon-span},${place.lat+span},${place.lon+span});out tags geom;`;
+  viewState.buildings = 'Loading live buildings…'; reportState();
   abortBuildings = new AbortController();
   try {
-    const response = await fetch('https://overpass-api.de/api/interpreter', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
-      body: `data=${encodeURIComponent(query)}`,
-      signal: abortBuildings.signal,
-    });
-    if (!response.ok) throw new Error(`Overpass HTTP ${response.status}`);
-    const result = await response.json();
+    const result = parseOSM(await fetchJSON('https://overpass-api.de/api/interpreter', {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+      body: `data=${encodeURIComponent(query)}`, signal: abortBuildings.signal,
+    }));
     if (loadSerial !== serial || request !== buildingRequest) return;
-    // One geometry per OSM building is created, then merged into batches.
-    const { meshes, count } = createBuildingBatches(result.elements, place, palette, buildingMaterial,
-      (lat, lon) => terrainCache.sample(lat, lon), terrainRelief, heightScale);
-    if (loadSerial !== serial) {
-      for (const mesh of meshes) mesh.geometry.dispose();
-      return;
-    }
-    for (const mesh of meshes) {
-      buildingGroup.add(mesh);
-    }
-    setPlaceMarkers(result.elements, place);
-    buildingGroup.visible = buildingsEnabled;
-    buildingsLoaded = true;
-    setStatus(`${mapWarning}${count.toLocaleString()} buildings · ${place.name} · An illustrated view of real places`);
+    liveElements = result.elements;
+    const count = installBuildings(liveElements, place);
+    viewState.buildings = count ? `${count.toLocaleString()} real footprints` : 'No buildings found here';
+    reportState();
   } catch (error) {
     if (error.name === 'AbortError' || loadSerial !== serial || request !== buildingRequest) return;
-    console.error(error);
-    setStatus('Map loaded. Overpass building data is unavailable or rate-limited; the colored map remains usable.');
+    viewState.buildings = 'Live buildings unavailable. Retry or choose a featured town';
+    retryButton.hidden = false; reportState();
   }
 }
 
 async function goTo(place) {
   const loadSerial = ++serial;
   buildingRequest++;
-  mapWarning = '';
   abortBuildings?.abort();
+  sceneAbort?.abort();
+  sceneAbort = new AbortController();
   current = place;
+  liveElements = null;
+  const key = bundledKey(place);
+  vectorMode = Boolean(key);
+  coverage = vectorMode ? null : { minX: -1600, maxX: 1600, minZ: -1600, maxZ: 1600 };
+  if (!vectorMode && place.zoom < 14) coverage = { minX: -15000, maxX: 15000, minZ: -15000, maxZ: 15000 };
+  mapCenter = { lat: place.lat, lon: place.lon };
   buildingsLoaded = false;
-  clearGroup(buildingGroup);
-  configureShadows(place.zoom);
-  scene.fog.density = place.zoom >= 14 ? 0.000045 : 0.000013;
+  renderer.domElement.dataset.buildings = '0';
+  renderer.domElement.dataset.scene = vectorMode ? key : 'live';
+  clearTiles(); clearGroup(vectorGroup, true); clearGroup(buildingGroup); clearPlaceMarkers();
+  retryButton.hidden = true;
+  document.querySelector('#relief').disabled = vectorMode;
+  document.querySelector('#reliefText').textContent = vectorMode ? 'Flat scene' : `${terrainRelief.toFixed(1)}×`;
+  scene.fog.density = vectorMode ? 0 : place.zoom >= 14 ? 0.000045 : 0.000013;
   updateLocationUI(place);
-  clearPlaceMarkers();
-  setStatus(`Loading ${place.name}…`);
-  const size = metersPerTile(place.lat, place.zoom);
-  resetCamera(place, size);
-  const { failed, terrain } = await loadMapTiles(place, loadSerial);
+  for (const panel of ['layers', 'help']) setPanel(panel, false);
+  viewState = { map: `Opening ${place.name}…`, buildings: '' }; reportState();
+  resetCamera(place);
+  if (key) {
+    try {
+      const base = `${import.meta.env.BASE_URL}data/`;
+      const [coast, data] = await Promise.all([
+        coastlineData || fetchJSON(`${base}coastline.json`, { signal: sceneAbort.signal }),
+        key === 'coastline' ? Promise.resolve(null) : fetchJSON(`${base}${key}.json`, { signal: sceneAbort.signal }).then(parseOSM),
+      ]);
+      if (loadSerial !== serial) return;
+      if (!Array.isArray(coast.rings) || !coast.rings.length) throw new Error('Missing coastline');
+      coastlineData = coast;
+      const world = createVectorScene(coast, data?.elements || [], place, palette);
+      vectorGroup.add(...world.children);
+      coverage = data ? localBounds(data.bounds, place) : { minX: -26000, maxX: 26000, minZ: -30000, maxZ: 30000 };
+      const count = data ? installBuildings(data.elements, place) : 0;
+      if (!data) setDestinationMarkers(place);
+      viewState = { map: data ? `${count.toLocaleString()} real footprints · Flat illustrated terrain` : 'Choose a town pin to explore its streets', buildings: '' };
+      reportState(); configureShadows(place.zoom);
+    } catch (error) {
+      if (error.name === 'AbortError' || loadSerial !== serial) return;
+      setStatus('Scene could not load. Check your connection and retry.');
+      retryButton.hidden = false;
+    }
+    return;
+  }
+  // Live scenery is optional; buildings never wait for raster/DEM requests.
+  const buildingTask = loadBuildings(place, loadSerial);
+  const { failed, completed, terrain } = await loadMapTiles(place, loadSerial);
   if (loadSerial !== serial) return;
-  mapWarning = failed ? `${failed} map tiles unavailable · ` : !terrain.succeeded ? 'Elevation unavailable · ' : '';
-  if (failed) setStatus(`${failed} OSM tiles failed; try again. Terrain ${terrain.succeeded}/${terrain.requested}.`);
-  else if (!terrain.succeeded) setStatus('Map loaded with photo-inspired textures; DEM unavailable, so this view is temporarily flat.');
-  else setStatus(`Map textured • ${terrain.succeeded}/${terrain.requested} elevation tiles. Loading buildings if enabled…`);
-  controls.target.y = terrainCache.sample(place.lat, place.lon) * terrainRelief;
-  controls.update();
-  await loadBuildings(place, loadSerial);
+  viewState.map = failed === completed ? 'Map tiles unavailable' : failed ? 'Some map tiles unavailable' : 'Live map ready';
+  if (!terrain.succeeded) viewState.map += ' · Elevation unavailable';
+  if (failed) retryButton.hidden = false;
+  controls.target.y = sampleGround(place.lat, place.lon) * terrainRelief;
+  reportState();
+  await buildingTask;
 }
 
 function focusOnWorldPoint(point) {
   const coords = inverseProject(point.x, point.z);
+  if (vectorMode && current.zoom < 14) { exploreNearest(coords); return; }
   goTo({
     name: `Custom ${coords.lat.toFixed(4)}°, ${coords.lon.toFixed(4)}°`,
     lat: clamp(coords.lat, -85, 85),
@@ -455,7 +507,7 @@ function updateLocationUI(place) {
   document.querySelector('#go').disabled = !key;
   document.querySelector('#locationChip').textContent = `Exploring ${place.name}`;
   document.querySelector('#placeName').textContent = place.name.startsWith('Custom ') ? 'Somewhere new' : place.name;
-  document.querySelector('#placeRegion').textContent = place.region || 'A LITTLE MORE TO DISCOVER';
+  document.querySelector('#exploreNearest').hidden = place !== DESTINATIONS.mauritius;
   document.querySelector('#placeDescription').textContent = place.description || 'Take the scenic route. Explore the streets, landscape and little details of this corner of the island.';
   for (const button of document.querySelectorAll('[data-destination]')) {
     const selected = button.dataset.destination === key;
@@ -471,11 +523,15 @@ function resetCamera(place, size = metersPerTile(place.lat, place.zoom)) {
   controls.enableDamping = false;
   controls.update();
   controls.enableDamping = damping;
-  frameHeight = size * (place.zoom >= 14 ? .9 : 4.7);
+  frameHeight = place === DESTINATIONS.mauritius
+    ? Math.max(110000, 60000 / (window.innerWidth / window.innerHeight))
+    : size * (place.zoom >= 14 ? .60 : 4.7);
   camera.zoom = 1;
   setCameraFrame(camera, frameHeight, window.innerWidth / window.innerHeight);
-  controls.target.set(0, terrainCache.sample(place.lat, place.lon) * terrainRelief, 0);
-  camera.position.copy(controls.target).add(new THREE.Vector3(-size * .85, size * 1.3, -size * 1.5));
+  controls.target.set(0, sampleGround(place.lat, place.lon) * terrainRelief, 0);
+  camera.position.copy(controls.target).add(place === DESTINATIONS.mauritius
+    ? new THREE.Vector3(0, size * 4, size * .6)
+    : new THREE.Vector3(-size * .85, size * 1.3, -size * 1.5));
   controls.autoRotate = false;
   camera.lookAt(controls.target);
   controls.update();
@@ -489,6 +545,25 @@ function clearPlaceMarkers() {
   placeMarkers = [];
   markerLayer.replaceChildren();
   popover.hidden = true;
+}
+
+function setDestinationMarkers(place) {
+  clearPlaceMarkers();
+  for (const key of ['portLouis', 'grandBaie', 'mahebourg', 'tamarin']) {
+    const town = DESTINATIONS[key];
+    const point = projectLocal(town.lat, town.lon, place.lat, place.lon);
+    const button = document.createElement('button');
+    button.className = 'placePin townPin'; button.textContent = town.name;
+    button.setAttribute('aria-label', `Explore ${town.name}`);
+    button.addEventListener('click', () => goTo(town));
+    markerLayer.appendChild(button);
+    placeMarkers.push({ ...point, lat: town.lat, lon: town.lon, button });
+  }
+}
+function exploreNearest(coords = inverseProject(controls.target.x, controls.target.z)) {
+  const town = ['portLouis', 'grandBaie', 'mahebourg', 'tamarin'].map(key => DESTINATIONS[key])
+    .sort((a, b) => Math.hypot(a.lat-coords.lat, a.lon-coords.lon) - Math.hypot(b.lat-coords.lat, b.lon-coords.lon))[0];
+  goTo(town);
 }
 
 function setPlaceMarkers(elements, place) {
@@ -519,7 +594,7 @@ const projectedMarker = new THREE.Vector3();
 function updatePlaceMarkers() {
   const occupied = [];
   for (const marker of placeMarkers) {
-    projectedMarker.set(marker.x, terrainCache.sample(marker.lat, marker.lon) * terrainRelief + 40, marker.z).project(camera);
+    projectedMarker.set(marker.x, sampleGround(marker.lat, marker.lon) * terrainRelief + 40, marker.z).project(camera);
     const x = (projectedMarker.x * .5 + .5) * window.innerWidth;
     const y = (-projectedMarker.y * .5 + .5) * window.innerHeight;
     const visible = projectedMarker.z > -1 && projectedMarker.z < 1 && x > 30 && x < window.innerWidth - 70 && y > 120 && y < window.innerHeight - 180 && !occupied.some(p => Math.hypot(p.x - x, p.y - y) < 48);
@@ -553,6 +628,8 @@ window.addEventListener('keydown', event => {
     popover.hidden = true;
   }
 });
+retryButton.addEventListener('click', () => goTo(current));
+document.querySelector('#exploreNearest').addEventListener('click', () => exploreNearest());
 document.querySelector('#wholeIsland').addEventListener('click', () => goTo(DESTINATIONS.mauritius));
 document.querySelector('#brandHome').addEventListener('click', event => {
   event.preventDefault();
@@ -563,6 +640,8 @@ for (const button of document.querySelectorAll('[data-destination]')) {
 }
 for (const [id, factor] of [['zoomIn', 1.3], ['zoomOut', 1 / 1.3]]) {
   document.querySelector(`#${id}`).addEventListener('click', () => {
+    if (factor < 1 && camera.zoom * factor <= controls.minZoom && current.zoom >= 14) { goTo(DESTINATIONS.mauritius); return; }
+    if (factor > 1 && current === DESTINATIONS.mauritius && camera.zoom >= 1.5) { exploreNearest(); return; }
     camera.zoom = clamp(camera.zoom * factor, controls.minZoom, controls.maxZoom);
     camera.updateProjectionMatrix();
   });
@@ -641,16 +720,33 @@ document.querySelector('#snapshot').addEventListener('click', () => {
 });
 
 window.addEventListener('resize', () => {
+  if (current === DESTINATIONS.mauritius) frameHeight = Math.max(110000, 60000 / (window.innerWidth / window.innerHeight));
   setCameraFrame(camera, frameHeight, window.innerWidth / window.innerHeight);
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
 });
 
+// Keep the camera target on loaded geography, preserving its heading and altitude.
+function constrainCamera() {
+  if (!coverage) return;
+  const x = clamp(controls.target.x, coverage.minX, coverage.maxX);
+  const z = clamp(controls.target.z, coverage.minZ, coverage.maxZ);
+  camera.position.x += x - controls.target.x; camera.position.z += z - controls.target.z;
+  controls.target.x = x; controls.target.z = z;
+}
+if (import.meta.env.DEV) window.__world = { get state() { return {
+  target: controls.target.toArray(), camera: camera.position.toArray(), zoom: camera.zoom,
+  heading: controls.getAzimuthalAngle(), coverage, vectorMode, current: current.name,
+  buildings: Number(renderer.domElement.dataset.buildings), drawCalls: renderer.info.render.calls,
+}; } };
 const clock = new THREE.Clock();
 function animate() {
   requestAnimationFrame(animate);
-  oceanTime.value += Math.min(clock.getDelta(), 0.05);
+  const delta = Math.min(clock.getDelta(), 0.05);
+  if (document.hidden) return;
+  if (controls.enableDamping) oceanTime.value += delta;
   controls.update();
+  constrainCamera();
   updatePlaceMarkers();
   renderer.render(scene, camera);
 }

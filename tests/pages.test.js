@@ -22,6 +22,11 @@ test('production assets and textures work under the GitHub Pages project path', 
     const javascript = await readFile(join(outDir, script.slice(base.length)), 'utf8');
     assert.doesNotMatch(javascript, /href=["']\/textures\//,
       'the texture-sheet link must not escape to the domain root');
+    for (const scene of ['coastline', 'portLouis', 'grandBaie', 'mahebourg', 'tamarin']) {
+      const snapshot = JSON.parse(await readFile(join(outDir, 'data', `${scene}.json`), 'utf8'));
+      assert.ok(snapshot.license.includes('odbl'), `${scene} is published with its data licence`);
+    }
+    assert.ok(javascript.includes(`${base}data/`), 'scene URLs retain the Pages project base');
     for (const texture of ['surface-atlas.png', 'building-atlas.png', 'material-reference-sheet.png']) {
       assert.ok((await stat(join(outDir, 'textures', texture))).isFile(), `${texture} is published`);
     }

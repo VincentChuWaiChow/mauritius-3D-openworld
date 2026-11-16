@@ -47,3 +47,24 @@ test('TerrainCache selects only visible DEM parent tiles for high-detail raster 
   assert.equal(result.succeeded,2);
   assert.equal(new Set(received).size,2);
 });
+
+test('overlapping overview and town primes retain their own DEM request level', async () => {
+  const terrain = new TerrainCache();
+  const received = [];
+  const release = [];
+  terrain.load = (z, x, y) => {
+    received.push([z, x, y]);
+    if (received.length <= 4) return new Promise(resolve => release.push(() => resolve({})));
+    return Promise.resolve({});
+  };
+  // Five distinct overview parents exceed the four workers: the final parent
+  // is requested only after a concurrent town prime changes the active level.
+  const overview = terrain.prime(Array.from({ length: 5 }, (_, x) => ({ x: x * 2, y: 100 })), 11);
+  assert.equal(release.length, 4);
+  const town = await terrain.prime([{ x: 1000, y: 1200 }], 15);
+  assert.deepEqual(town, { succeeded: 1, requested: 1 });
+  release.forEach(resolve => resolve());
+  assert.deepEqual(await overview, { succeeded: 5, requested: 5 });
+  assert.deepEqual(received, [[10, 0, 50], [10, 1, 50], [10, 2, 50], [10, 3, 50], [12, 125, 150], [10, 4, 50]]);
+  assert.equal(terrain.level, 12, 'finishing an old prime must not change the active sampling level');
+});

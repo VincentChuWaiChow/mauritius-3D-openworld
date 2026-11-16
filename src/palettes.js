@@ -69,7 +69,7 @@ export const PALETTES = {
     },
   },
   osm: {
-    label: 'Original OSM',
+    label: 'OSM colours',
     originalTiles: true,
     sky: '#b9d3e4', fog: '#cddde2', ocean: '#aad3df', lagoon: '#aad3df',
     land: '#f2efe9', vegetation: '#b5d7ab', roads: '#ffffff',
