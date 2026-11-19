@@ -1,0 +1,322 @@
+import {ribbon,roadPass} from './road-ribbon.js';
+import * as THREE from 'three';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {project, unproject} from './geo.js';
+import {TerrainCache, buildTerrainGeometry} from './terrain.js';
+import {THEMES,selectLook,windowSlots} from './style.js';
+import {selectBuildingCluster,cameraSpan} from './focus.js';
+document.documentElement.dataset.started='true';
+const assets=import.meta.env.BASE_URL+'explorer/';
+const $=id=>document.getElementById(id),host=$('world');
+const scene=new THREE.Scene();scene.background=new THREE.Color('#82b9c8');
+const camera=new THREE.OrthographicCamera(-150,150,120,-120,.1,22000);
+let renderer,software=false,controls,data,current,overviewMode=false,topMode=false,span=220,dirty=true,lastRender=0,heightScale=1;
+let terrainMeshes=null,demActive=false,demToken=0,themeId='little',sun;
+let cameraMode='close', selectedBuilding=null;
+// Orthographic scale is measured in world units across the viewport height.
+const MIN_VIEW=3, MAX_VIEW=15500, held=new Set();
+let desiredView=null, anchor=null, previousFrame=0, roamKey='', roamGeneration=0, lastCheck=0;
+const view=()=>span/camera.zoom;
+function setView(h){
+ camera.zoom=span/THREE.MathUtils.clamp(h,MIN_VIEW,MAX_VIEW);
+ camera.updateProjectionMatrix(); dirty=true;
+}
+function queueZoom(factor,point=null){
+ animation=null; anchor=point; desiredView=THREE.MathUtils.clamp((desiredView??view())*factor,MIN_VIEW,MAX_VIEW);
+}
+const focusCache=new Map();
+const elevation=new TerrainCache(), textures=new Map();
+let groups={},markers=[],buildingHits=[],cars=[],cpuFaces=[],animation=null;
+const colors={...THEMES.little};
+const fromGeo=point=>{const p=project(point);return new THREE.Vector3(p.x,0,p.z)};
+const vector=(x,y,z)=>new THREE.Vector3(x,y,z);
+const root=new THREE.Group();scene.add(root);
+const raycaster=new THREE.Raycaster(),pointer=new THREE.Vector2();
+function seeded(n){let x=Math.sin(n*127.1+311.7)*43758.5453;return x-Math.floor(x)}
+function bucket(group,color){group.userData.buckets??=new Map();if(!group.userData.buckets.has(color))group.userData.buckets.set(color,[]);return group.userData.buckets.get(color)}
+function tri(group,color,a,b,c){bucket(group,color).push(...a,...b,...c)}
+function quad(g,c,a,b,d,e){tri(g,c,a,b,d);tri(g,c,a,d,e)}
+function box(g,c,x,y,z,w,h,d){let x0=x-w/2,x1=x+w/2,z0=z-d/2,z1=z+d/2,y1=y+h;quad(g,c,[x0,y1,z0],[x0,y1,z1],[x1,y1,z1],[x1,y1,z0]);quad(g,c,[x0,y,z0],[x0,y1,z0],[x1,y1,z0],[x1,y,z0]);quad(g,c,[x1,y,z0],[x1,y1,z0],[x1,y1,z1],[x1,y,z1]);quad(g,c,[x1,y,z1],[x1,y1,z1],[x0,y1,z1],[x0,y,z1]);quad(g,c,[x0,y,z1],[x0,y1,z1],[x0,y1,z0],[x0,y,z0]);}
+function cone(g,c,x,y,z,r,h,sides=6){for(let i=0;i<sides;i++){let a=i/sides*Math.PI*2,b=(i+1)/sides*Math.PI*2;tri(g,c,[x+Math.cos(a)*r,y,z+Math.sin(a)*r],[x,y+h,z],[x+Math.cos(b)*r,y,z+Math.sin(b)*r]);}}
+function polygon(g,c,pts,y){if(pts.length<3)return;const contour=pts.map(p=>new THREE.Vector2(p.x,p.z));const indices=THREE.ShapeUtils.triangulateShape(contour,[]);const offset=v=>g.name==='buildings'?0:groundY(v);for(const [a,b,d] of indices)tri(g,c,[pts[a].x,offset(pts[a])+y,pts[a].z],[pts[d].x,offset(pts[d])+y,pts[d].z],[pts[b].x,offset(pts[b])+y,pts[b].z]);}
+function groundY(point){return demActive?elevation.sceneHeight(point):0;}
+function path(g,c,pts,width,y){
+ const samples=[];
+ for(let i=0;i<pts.length;i++){
+   const b=pts[i],a=pts[i-1]??b, dx=b.x-a.x,dz=b.z-a.z;
+   const n=demActive?Math.min(60,Math.max(1,Math.ceil(Math.hypot(dx,dz)/6))):1;
+   for(let j=1;j<=n;j++){
+     const x=a.x+dx*j/n,z=a.z+dz*j/n;
+     samples.push({x,z,y:groundY({x,z})+y});
+   }
+ }
+ ribbon(samples,width,(a,b,d,e)=>quad(g,c,a,b,d,e));
+}
+function materialFor(group,color){
+ const name=group.name;
+ let pattern;
+ if(name==='roads')pattern=color===colors.roads?'asphalt':null;
+ if(name==='land')pattern=color===colors.shore?'coral-sand':color===colors.land?'grassland':null;
+ if(name==='nature'&&color===colors.park)pattern='grassland';
+ if(name==='buildings'){
+   const wall=colors.walls.indexOf(color),roof=colors.roofs.indexOf(color);
+   pattern=wall>=0?['stucco','window-grid','masonry','stucco'][wall]:roof>=0?['roof-terracotta','roof-pale','roof-metal','roof-concrete','roof-pale','roof-terracotta'][roof]:null;
+ }
+ const options={color,side:THREE.DoubleSide,roughness:.94,metalness:.0,flatShading:true};
+ if(pattern&&textures.has(pattern)){options.map=textures.get(pattern);}
+ return new THREE.MeshStandardMaterial(options);
+}
+function compile(g){for(const [color,positions]of g.userData.buckets||[]){
+ const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
+ const uv=[];for(let i=0;i<positions.length;i+=9){
+   const ax=positions[i],ay=positions[i+1],az=positions[i+2];
+   const bx=positions[i+3],by=positions[i+4],bz=positions[i+5];
+   const cx=positions[i+6],cy=positions[i+7],cz=positions[i+8];
+   const nx=(by-ay)*(cz-az)-(bz-az)*(cy-ay), ny=(bz-az)*(cx-ax)-(bx-ax)*(cz-az), nz=(bx-ax)*(cy-ay)-(by-ay)*(cx-ax);
+   const roof=Math.abs(ny)>Math.abs(nx)*.7&&Math.abs(ny)>Math.abs(nz)*.7;
+   for(let j=i;j<i+9;j+=3){const x=positions[j],y=positions[j+1],z=positions[j+2];
+     const u=roof?x*.43:(Math.abs(nx)>Math.abs(nz)?z*.6:x*.6);
+     const v=roof?z*.43:y*.9;uv.push(u,v);
+   }
+ }
+ geo.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));geo.computeVertexNormals();
+ const mesh=new THREE.Mesh(geo,materialFor(g,color));mesh.userData.color=color;
+ mesh.castShadow=g.name==='buildings';mesh.receiveShadow=g.name==='buildings'||g.name==='land';g.add(mesh);
+ }delete g.userData.buckets;}
+function loadTextures(){
+ const names=['stucco','window-grid','masonry','roof-concrete','roof-terracotta','roof-metal','roof-pale','grassland','coral-sand','asphalt'];
+ const loader=new THREE.TextureLoader();for(const name of names){
+  const tex=loader.load(assets+'textures/'+name+'.png',()=>{dirty=true;},undefined,()=>{dirty=true;});
+  tex.colorSpace=THREE.SRGBColorSpace;tex.wrapS=tex.wrapT=THREE.RepeatWrapping;
+  tex.anisotropy=4; textures.set(name,tex);
+ }
+}
+function group(name){const g=new THREE.Group();g.name=name;root.add(g);groups[name]=g;return g;}
+function tree(g,x,z,size=1,seed=0){const floor=groundY({x,z});box(g,'#887b51',x,floor+.1,z,.2*size,1.1*size,.2*size);cone(g,['#3f8356','#548e56','#609a5b','#408c65'][seed%4],x,floor+.75*size,z,.85*size,1.5*size,5);cone(g,'#76a966',x,floor+1.5*size,z,.6*size,1.1*size,5);}
+function palm(g,x,z,size=1){const floor=groundY({x,z});box(g,'#a48a61',x,floor+.1,z,.15*size,1.7*size,.15*size);for(let i=0;i<6;i++){const a=i*Math.PI/3;const dx=Math.cos(a),dz=Math.sin(a);tri(g,i%2?'#4b9577':'#378367',[x,floor+1.9*size,z],[x+dx*1.2*size-dz*.22*size,floor+1.5*size,z+dz*1.2*size+dx*.22*size],[x+dx*1.5*size,floor+1.3*size,z+dz*1.5*size]);}}
+function clearWorld(){markers.forEach(m=>m.el.remove());markers=[];cars=[];buildingHits=[];selectedBuilding=null;cpuFaces=[];root.traverse(o=>{o.geometry?.dispose();if(o.material)o.material.dispose()});root.clear();groups={};$('detail').hidden=true;}
+function inPolygon(p,poly){let inside=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if(((a.z>p.z)!==(b.z>p.z))&&(p.x<(b.x-a.x)*(p.z-a.z)/(b.z-a.z)+a.x))inside=!inside;}return inside;}
+function heightMeters(value){
+ if(value==null)return NaN;
+ const text=String(value).trim().toLowerCase().replace(',','.');
+ const m=text.match(/^([0-9]+(?:\.[0-9]+)?)\s*(m|metre|meter|metres|meters|ft|feet|')?$/);
+ if(!m)return NaN;
+ return Number(m[1])*(m[2]==='ft'||m[2]==='feet'||m[2]==="'"?.3048:1);
+}
+function buildRoof(g,points,roof,wall,y,height,look){
+ polygon(g,roof,points,y+height);
+ if(points.length!==4||height>1.9||!look.pitched)return;
+ const edge=points.map((p,i)=>Math.hypot(p.x-points[(i+1)%4].x,p.z-points[(i+1)%4].z));
+ if(Math.min(...edge)<.65||Math.max(...edge)>9)return;
+ const mids=(i,j)=>[(points[i].x+points[j].x)/2,(points[i].z+points[j].z)/2];
+ const first=edge[0]>=edge[1]?[0,3,1,2]:[0,1,3,2];
+ const [a,b,c,d]=first, ridgeA=mids(a,b),ridgeB=mids(c,d),rise=Math.min(.44,Math.min(...edge)*.29);
+ const v=(i,yy)=>[points[i].x,yy,points[i].z],r=(mid)=>[mid[0],y+height+rise,mid[1]];
+ quad(g,roof,v(a,y+height),v(c,y+height),r(ridgeB),r(ridgeA));
+ quad(g,roof,v(b,y+height),v(d,y+height),r(ridgeB),r(ridgeA));
+ tri(g,wall,v(a,y+height),v(b,y+height),r(ridgeA));
+ tri(g,wall,v(c,y+height),v(d,y+height),r(ridgeB));
+}
+function marker(name,icon,position,action){const el=document.createElement('button');el.className='pin';el.setAttribute('aria-label',name);el.innerHTML=icon+'<span></span>';el.querySelector('span').textContent=name;el.onclick=action;$('labels').append(el);markers.push({el,position});}
+function buildWorld(region,isOverview=false){clearWorld();if(region.id!=='free')current=region;overviewMode=isOverview;
+ const land=group('land'),road=group('roads'),nature=group('nature'),build=group('buildings'),traffic=group('traffic');
+ const polys=data.land.map(r=>r.slice(0,-1).map(fromGeo));
+ const currentMesh=terrainMeshes&&(isOverview?terrainMeshes.overview:terrainMeshes.regions[region.id]);
+ if(demActive&&currentMesh){
+   const g=buildTerrainGeometry(THREE,currentMesh,elevation,colors);
+   const mesh=new THREE.Mesh(g,new THREE.MeshStandardMaterial({vertexColors:true,flatShading:true,roughness:1,side:THREE.DoubleSide}));
+   mesh.receiveShadow=true;mesh.userData.color=colors.land;land.add(mesh);
+ }else for(const p of polys)polygon(land,colors.land,p,0);
+ for(const p of polys)path(land,colors.shore,[...p,p[0]],isOverview?7:1.2,.035);
+ const roads=isOverview?data.mainRoads:region.roads;
+ for(const r of roads){const pts=r.points.map(fromGeo);const width=({motorway:1.6,trunk:1.35,primary:1.2,secondary:1,tertiary:.85,residential:.65,service:.45,pedestrian:.5})[r.kind]||.6;path(road,colors.sidewalk,pts,isOverview?Math.max(width,6):width+.35,.045);path(road,colors.roads,pts,isOverview?Math.max(width*.8,4):width,.055);if(!isOverview&&['motorway','trunk','primary','secondary'].includes(r.kind))path(road,'#d6d7bd',pts,.04,.065);}
+ if(!isOverview){
+ for(const p of region.parks)polygon(nature,colors.park,p.slice(0,-1).map(fromGeo),.075);
+ for(const b of region.buildings){
+  const p=b.points.slice(0,-1).map(fromGeo);if(p.length<3)continue;
+  const bounds=new THREE.Box3().setFromPoints(p),size=bounds.getSize(new THREE.Vector3()),center=bounds.getCenter(new THREE.Vector3());
+  const rawHeight=heightMeters(b.height),levels=parseFloat(b.levels);
+  const known=(Number.isFinite(rawHeight)&&rawHeight>0)||(Number.isFinite(levels)&&levels>0);
+  const naturalHeight=Number.isFinite(rawHeight)&&rawHeight>0?rawHeight:Number.isFinite(levels)&&levels>0?levels*3:(5+seeded(b.id)*5);
+  const h=THREE.MathUtils.clamp(naturalHeight,1.5,300)/10*heightScale;
+  const ground=groundY(center),look=selectLook(b);
+  const roof=colors.roofs[look.roof],wall=colors.walls[look.wall];
+  // Appearance is art-directed. The polygon remains the mapped OSM footprint.
+  if(!demActive)polygon(land,'#8ea779',p.map(v=>vector(v.x+.8,0,v.z+.5)),.02);
+  buildRoof(build,p,roof,wall,ground,h,look);
+  for(let i=0;i<p.length;i++){
+    const a=p[i],d=p[(i+1)%p.length];
+    quad(build,wall,[a.x,ground+.04,a.z],[d.x,ground+.04,d.z],[d.x,ground+h,d.z],[a.x,ground+h,a.z]);
+    const dx=d.x-a.x,dz=d.z-a.z,len=Math.hypot(dx,dz);
+    if(len<.7||len>18)continue;
+    const nx=dz/len*.016,nz=-dx/len*.016;
+    for(const w of windowSlots(len,h,look.windowStyle)){
+       const x=a.x+dx*w.t+nx,z=a.z+dz*w.t+nz;
+       const u=dx/len*w.width/2,v=dz/len*w.width/2;
+       const y0=ground+w.y,y1=y0+w.height;
+       quad(build,'#456665',[x-u,y0,z-v],[x+u,y0,z+v],[x+u,y1,z+v],[x-u,y1,z-v]);
+    }
+  }
+  if(!look.pitched&&look.equipment&&size.x>.9&&size.z>.9){
+    box(build,'#a7ad9b',center.x,ground+h,center.z,Math.min(size.x*.26,.85),.12,Math.min(size.z*.24,.8));
+  }
+  buildingHits.push({b,points:p,center:vector(center.x,ground+h,center.z),height:h,ground,known});
+ }
+ // Ornamental roadside trees: deliberately not presented as mapped tree locations.
+ let n=0;for(const r of region.roads){if(r.points.length<2)continue;const pts=r.points.map(fromGeo);if(seeded(r.id)>.55)continue;const p=pts[Math.floor(pts.length/2)],a=pts[0],b=pts.at(-1),dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz)||1;const x=p.x-dz/len*1.3,z=p.z+dx/len*1.3;if(polys.some(poly=>inPolygon({x,z},poly))&&!buildingHits.some(b=>Math.abs(b.center.x-x)<1&&Math.abs(b.center.z-z)<1)){if(n%5===0)palm(nature,x,z,.9);else tree(nature,x,z,.7+(seeded(r.id+2)*.6),n);if(++n>180)break;}}
+ for(const b of buildingHits.filter(b=>b.b.name).slice(0,8)){const icon=/bank/i.test(b.b.name)?'🏦':/mosq|church|temple/i.test(b.b.name)?'🏛':/market|shop|store/i.test(b.b.name)?'🛍':'📍';marker(b.b.name,icon,b.center,()=>showBuilding(b));}
+ const selected=region.roads.filter(r=>['primary','secondary','tertiary','residential'].includes(r.kind)&&r.points.length>2).filter((r,i)=>i%7===0).slice(0,14);
+ for(const [i,r]of selected.entries()){const g=new THREE.Group();traffic.add(g);box(g,['#f4d769','#e99576','#e9ebdb','#4c8e9b','#b8c9d2'][i%5],0,.11,0,.32,.25,.67);box(g,'#455e63',0,.35,.02,.27,.14,.32);box(g,'#354c47',-.18,.1,0,.07,.14,.5);box(g,'#354c47',.18,.1,0,.07,.14,.5);compile(g);const curve=new THREE.CurvePath();const pts=r.points.map(fromGeo);for(const p of pts)p.y=groundY(p)+.13;for(let j=1;j<pts.length;j++)curve.add(new THREE.LineCurve3(pts[j-1],pts[j]));cars.push({g,curve,offset:seeded(r.id),speed:.7/Math.max(curve.getLength(),1)});}
+ }else{
+ for(const r of data.regions)marker(r.name,r.icon,fromGeo(r.center),()=>goRegion(r.id));
+ // No artificial mountain cones: mountains only appear with real DEM data.
+ }
+ for(const g of [land,road,nature,build])compile(g);
+ document.querySelectorAll('[data-layer]').forEach(input=>groups[input.dataset.layer].visible=input.checked);
+ if(software)collectFaces();dirty=true;
+}
+function collectFaces(){cpuFaces=[];root.updateMatrixWorld(true);root.traverse(mesh=>{if(!mesh.isMesh)return;const a=mesh.geometry.attributes.position.array,base=new THREE.Color(mesh.userData.color||'#cccccc');for(let i=0;i<a.length;i+=9){let p1=vector(a[i],a[i+1],a[i+2]),p2=vector(a[i+3],a[i+4],a[i+5]),p3=vector(a[i+6],a[i+7],a[i+8]);const normal=p2.clone().sub(p1).cross(p3.clone().sub(p1)).normalize();const light=.76+.24*Math.abs(normal.dot(vector(-.4,.8,.3).normalize()));const c=base.clone().multiplyScalar(light);let layer=mesh;while(layer.parent&&layer.parent!==root)layer=layer.parent;const maxY=Math.max(p1.y,p2.y,p3.y);let order=6;if(layer.name==='land')order=mesh.userData.color===colors.land?0:mesh.userData.color===colors.shore?1:2;else if(layer.name==='roads')order=roadPass(mesh.userData.color,colors);else if(layer.name==='nature'&&maxY<.09)order=2;cpuFaces.push({mesh,a:p1,b:p2,c:p3,color:'#'+c.getHexString(),order});}});}
+function visible(o){for(let p=o;p;p=p.parent)if(!p.visible)return false;return true;}
+function softwareRender(){const ctx=renderer.ctx,w=host.clientWidth,h=host.clientHeight;ctx.setTransform(renderer.ratio,0,0,renderer.ratio,0,0);ctx.fillStyle=colors.water;ctx.fillRect(0,0,w,h);scene.updateMatrixWorld(true);camera.updateMatrixWorld();const vp=new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse),cache=new Map(),list=[];for(const f of cpuFaces){if(!visible(f.mesh))continue;let matrix=cache.get(f.mesh);if(!matrix){matrix=new THREE.Matrix4().multiplyMatrices(vp,f.mesh.matrixWorld);cache.set(f.mesh,matrix)}const a=f.a.clone().applyMatrix4(matrix),b=f.b.clone().applyMatrix4(matrix),c=f.c.clone().applyMatrix4(matrix);if(Math.min(a.x,b.x,c.x)>1||Math.max(a.x,b.x,c.x)<-1||Math.min(a.y,b.y,c.y)>1||Math.max(a.y,b.y,c.y)<-1)continue;list.push({a,b,c,color:f.color,order:f.order,depth:(a.z+b.z+c.z)/3});}list.sort((a,b)=>a.order-b.order||b.depth-a.depth);for(const f of list){ctx.beginPath();ctx.moveTo((f.a.x+1)*w/2,(1-f.a.y)*h/2);ctx.lineTo((f.b.x+1)*w/2,(1-f.b.y)*h/2);ctx.lineTo((f.c.x+1)*w/2,(1-f.c.y)*h/2);ctx.closePath();ctx.fillStyle=f.color;ctx.fill();} }
+function updateLabels(){camera.updateMatrixWorld();for(const m of markers){let p=m.position.clone();p.y=p.y+.9;p.project(camera);m.el.style.left=((p.x+1)*host.clientWidth/2)+'px';m.el.style.top=((1-p.y)*host.clientHeight/2)+'px';m.el.hidden=!$('labels-check').checked||p.z>1||Math.abs(p.x)>1||Math.abs(p.y)>1;}}
+function resize(){let aspect=host.clientWidth/host.clientHeight;camera.left=-span*aspect/2;camera.right=span*aspect/2;camera.top=span/2;camera.bottom=-span/2;camera.updateProjectionMatrix();renderer.setSize(host.clientWidth,host.clientHeight);dirty=true;}
+function closeFocus(region) {
+  let chosen=focusCache.get(region.id);
+  if(!chosen){chosen=selectBuildingCluster(region,project);focusCache.set(region.id,chosen);}
+  return vector(chosen.x,0,chosen.z);
+}
+function setCameraMode(mode) {
+ cameraMode=mode;
+ for(const id of ['close','district']){
+   const btn=$(id+'-view');
+   btn.classList.toggle('active',mode===id);
+   btn.setAttribute('aria-pressed',String(mode===id));
+ }
+}
+function pose(target,world=false,animate=true,mode='close'){if(sun){sun.target.position.copy(target);sun.position.copy(target).add(vector(world?-1800:-90,world?6000:340,world?2700:130));sun.shadow.camera.left=world?-4200:-270;sun.shadow.camera.right=world?4200:270;sun.shadow.camera.top=world?4200:270;sun.shadow.camera.bottom=world?-4200:-270;sun.shadow.camera.updateProjectionMatrix();}topMode=false;$('top').classList.remove('active');$('top').setAttribute('aria-pressed','false');controls.enableRotate=true;controls.autoRotate=false;$('rotate').classList.remove('active');$('rotate').setAttribute('aria-pressed','false');setCameraMode(world?'overview':mode);const initial=view();span=world?7600:cameraSpan(current,mode);
+ const aspect=host.clientWidth/host.clientHeight;if(world)span=Math.min(MAX_VIEW,Math.max(span,6000/aspect));else if(aspect<.8)span*=1.3;
+ resize();controls.minZoom=span/MAX_VIEW;controls.maxZoom=span/MIN_VIEW;desiredView=null;anchor=null;setView(animate?initial:span);
+ const pos=target.clone().add(world?vector(1700,7000,3900):mode==='building'?vector(24,48,40):vector(90,170,130));if(animate){animation={initial,end:span,start:performance.now(),from:camera.position.clone(),to:pos,fromTarget:controls.target.clone(),toTarget:target};}else{camera.position.copy(pos);controls.target.copy(target);controls.update();}dirty=true;}
+function goRegion(id,animate=true){roamingRegion=null;roamGeneration++;roamKey='';const r=data.regions.find(r=>r.id===id);if(!r)return;demActive=false;buildWorld(r);$('region-tag').textContent=r.tag;$('region-name').innerHTML=r.name+'<span>.</span>';$('region-description').textContent=r.description;$('world-status').textContent='Building close-up · '+r.name;$('overview').classList.remove('active');document.querySelectorAll('.destination').forEach(b=>b.classList.toggle('active',b.dataset.region===id));pose(closeFocus(r),false,animate,'close');void requestElevation();}
+function showBuilding(entry){selectedBuilding=entry;$('detail').hidden=false;$('building-name').textContent=entry.b.name||'Island rooftop';$('building-description').textContent=`Footprint from OpenStreetMap. ${entry.known?'Height based on a mapped height or level count.':'Height is an illustration; no usable height was recorded.'} Shown at ${heightScale}× height. Colours and rooftop details are decorative.`;$('building-link').href=`https://www.openstreetmap.org/way/${entry.b.id}`;}
+function setTerrainStatus(text){$('terrain-status').textContent=text;}
+async function requestElevation(){
+ const token=++demToken;
+ if(roamingRegion){demActive=false;setTerrainStatus('Free exploration · flat terrain');buildWorld(roamingRegion);return;}
+ if(!$('terrain-enabled').checked){demActive=false;setTerrainStatus('Elevation off · flat map');buildWorld(roamingRegion??current,overviewMode);dirty=true;return;}
+ // Bounds are limited to the explicit user-selected map, not bulk country tiles.
+ const zoom=overviewMode?10:12;
+ const center=overviewMode?[57.565,-20.265]:current.center;
+ const radius=overviewMode?42000:current.span*1.2;
+ const latDiff=radius/110700,lonDiff=radius/(104500);
+ const bounds={minLon:center[0]-lonDiff,maxLon:center[0]+lonDiff,minLat:center[1]-latDiff,maxLat:center[1]+latDiff};
+ setTerrainStatus('Loading real elevation…');
+ try{
+  const result=await elevation.prime(bounds,zoom);
+  if(token!==demToken)return;
+  elevation.zoom=zoom;
+  demActive=result.requested>0&&result.received===result.requested;
+  setTerrainStatus(demActive?'Mapzen elevation · real DEM':'Flat fallback · DEM unavailable');
+ }catch(e){if(token!==demToken)return;demActive=false;setTerrainStatus('Flat fallback · DEM unavailable');}
+ buildWorld(roamingRegion??current,overviewMode);dirty=true;
+}
+let roamingRegion=null, tileIndex;
+const tileCache=new Map();
+function tile(key){
+ if(!tileCache.has(key)){
+   tileCache.set(key,fetch(assets+'tiles/'+key+'.json').then(r=>{if(!r.ok)throw Error('Tile unavailable');return r.json();}).catch(e=>{tileCache.delete(key);throw e;}));
+   if(tileCache.size>36)tileCache.delete(tileCache.keys().next().value);
+ }
+ return tileCache.get(key);
+}
+function localFrame(mode){pose(controls.target.clone(),false,true,mode);}
+function freeLabel(wide){
+ $('region-tag').textContent='FREE EXPLORATION';$('region-name').textContent='Mauritius.';
+ $('region-description').textContent='WASD to travel. Point and scroll to explore anywhere on the island.';
+ $('world-status').textContent=wide?'Island map':'Mapped streets';$('overview').classList.toggle('active',wide);
+ document.querySelectorAll('.destination.active').forEach(b=>b.classList.remove('active'));
+ setCameraMode(wide?'overview':'free');
+}
+async function trackDetail(){
+ const v=view(), p=controls.target;
+ if(v>(overviewMode?180:240)){
+   if(overviewMode&&roamKey){roamGeneration++;roamKey='';}
+   if(!overviewMode){roamGeneration++;roamKey='';roamingRegion=null;demActive=false;demToken++;buildWorld(current,true);freeLabel(true);void requestElevation();}
+   return;
+ }
+ if(!overviewMode&&!roamingRegion&&p.distanceTo(fromGeo(current.center))<current.span/22){if(roamKey){roamGeneration++;roamKey='';}return;}
+ if(!tileIndex)return;
+ const [lon,lat]=unproject(p),x=Math.floor((lon-57)*200),y=Math.floor((lat+21)*200);
+ const key=[x,y,Math.floor((lon-57)*400)%2,Math.floor((lat+21)*400)%2].join('_');if(roamKey===key)return;
+ roamKey=key;const token=++roamGeneration, keys=[];
+ for(let i=x-1;i<=x+1;i++)for(let j=y-1;j<=y+1;j++)if(tileIndex.has(i+'_'+j))keys.push(i+'_'+j);
+ try{
+  const parts=await Promise.all(keys.map(tile));if(token!==roamGeneration)return;
+  const dist=b=>(b.points[0][0]-lon)**2*.88+(b.points[0][1]-lat)**2;
+  roamingRegion={id:'free',center:[lon,lat],roads:parts.flatMap(t=>t.roads),buildings:parts.flatMap(t=>t.buildings).sort((a,b)=>dist(a)-dist(b)).slice(0,software?180:550),parks:[]};
+  demToken++;demActive=false;setTerrainStatus('Free exploration · flat terrain');
+  buildWorld(roamingRegion);freeLabel(false);
+ }catch{if(token===roamGeneration){roamKey='';$('world-status').textContent='Street data unavailable';lastCheck=performance.now()+3000;}}
+}
+function setupInteraction(){
+ $('destinations').innerHTML=data.regions.map(r=>`<button class="destination" data-region="${r.id}"><span class="destination-icon">${r.icon}</span><span><strong>${r.name}</strong><small>${r.tag}</small></span></button>`).join('');document.querySelectorAll('.destination').forEach(b=>b.onclick=()=>goRegion(b.dataset.region));
+ $('overview').onclick=()=>{roamingRegion=null;roamGeneration++;roamKey='';demActive=false;buildWorld(current,true);$('region-tag').textContent='ONE ISLAND. MANY LITTLE WORLDS.';$('region-name').innerHTML='Mauritius<span>.</span>';$('region-description').textContent='Point at any part of the island and scroll into its streets. This is the main island, shaped by OpenStreetMap.';$('world-status').textContent='The whole island';$('overview').classList.add('active');document.querySelectorAll('.destination').forEach(b=>b.classList.remove('active'));pose(fromGeo([57.565,-20.265]),true,true);void requestElevation();};
+ $('reset').onclick=()=>roamingRegion?localFrame('close'):pose(overviewMode?fromGeo([57.565,-20.265]):cameraMode==='district'?fromGeo(current.center):closeFocus(current),overviewMode,true,overviewMode?'overview':cameraMode==='district'?'district':'close');
+ $('close-view').onclick=()=>{if(overviewMode||roamingRegion){localFrame('close');return;}pose(closeFocus(current),false,true,'close');$('world-status').textContent='Building close-up · '+current.name;};
+ $('district-view').onclick=()=>{if(overviewMode||roamingRegion){localFrame('district');return;}pose(fromGeo(current.center),false,true,'district');$('world-status').textContent='District view · '+current.name;};
+ $('focus-building').onclick=()=>{if(!selectedBuilding)return;pose(vector(selectedBuilding.center.x,selectedBuilding.ground,selectedBuilding.center.z),false,true,'building');$('detail').hidden=true;$('world-status').textContent='Inspecting mapped building · '+current.name;};
+ for(const [id,factor]of [['zoom-in',1.3],['zoom-out',1/1.3]])$(id).onclick=()=>{queueZoom(1/factor);};
+ $('rotate').onclick=()=>{controls.autoRotate=!controls.autoRotate;$('rotate').classList.toggle('active',controls.autoRotate);$('rotate').setAttribute('aria-pressed',String(controls.autoRotate));dirty=true;};
+ $('top').onclick=()=>{topMode=!topMode;controls.autoRotate=false;$('rotate').classList.remove('active');$('rotate').setAttribute('aria-pressed','false');$('top').classList.toggle('active',topMode);$('top').setAttribute('aria-pressed',String(topMode));controls.enableRotate=!topMode;const target=controls.target.clone();camera.position.copy(target).add(topMode?vector(0,overviewMode?7000:230,.01):vector(overviewMode?1700:90,overviewMode?7000:170,overviewMode?3900:130));controls.update();dirty=true;};
+ $('layers-button').onclick=()=>{const panel=$('layers-panel');panel.hidden=!panel.hidden;$('layers-button').setAttribute('aria-expanded',String(!panel.hidden));};document.querySelectorAll('[data-layer]').forEach(input=>input.onchange=()=>{groups[input.dataset.layer].visible=input.checked;dirty=true;});$('labels-check').onchange=()=>dirty=true;$('height').oninput=()=>{heightScale=+$('height').value;$('height-value').value=heightScale+'×';buildWorld(roamingRegion??current,overviewMode);dirty=true;};
+ $('theme').onchange=()=>{themeId=$('theme').value;Object.assign(colors,THEMES[themeId]);scene.background.set(colors.water);buildWorld(roamingRegion??current,overviewMode);dirty=true;};
+ $('terrain-enabled').onchange=()=>{void requestElevation();};
+ $('help').onclick=$('credits-button').onclick=()=>$('about').showModal();$('close-about').onclick=()=>$('about').close();$('about').onclick=e=>{if(e.target===$('about'))$('about').close()};$('close-detail').onclick=()=>$('detail').hidden=true;
+ let down;renderer.domElement.addEventListener('pointerdown',e=>down=[e.clientX,e.clientY]);renderer.domElement.addEventListener('pointerup',e=>{if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>5||overviewMode)return;pointer.set(e.clientX/host.clientWidth*2-1,-e.clientY/host.clientHeight*2+1);raycaster.setFromCamera(pointer,camera);root.updateMatrixWorld(true);const hits=groups.buildings.visible?raycaster.intersectObjects(groups.buildings.children,false):[];if(hits.length){const hit=hits[0].point;const b=buildingHits.find(b=>inPolygon(hit,b.points));if(b)showBuilding(b);}});
+ window.addEventListener('resize',resize);document.addEventListener('keydown',e=>{if(e.key==='Escape'){$('detail').hidden=true;$('layers-panel').hidden=true;controls.autoRotate=false;}if(e.key.toLowerCase()==='r'&&!$('about').open)$('reset').click();});
+}
+function tick(time){requestAnimationFrame(tick);if(document.hidden)return;const delta=Math.min((time-previousFrame)/1000,.08);previousFrame=time;if(animation){const t=Math.min((time-animation.start)/750,1),ease=1-(1-t)**3;setView(animation.initial*(animation.end/animation.initial)**ease);camera.position.lerpVectors(animation.from,animation.to,ease);controls.target.lerpVectors(animation.fromTarget,animation.toTarget,ease);if(t===1)animation=null;dirty=true;}
+ if(desiredView!==null){
+   const before=view(),next=desiredView*(before/desiredView)**Math.exp(-15*delta);
+   const done=Math.abs(Math.log(next/desiredView))<.0003;setView(done?desiredView:next);
+   if(anchor){const shift=anchor.clone().sub(controls.target).multiplyScalar(1-view()/before);camera.position.add(shift);controls.target.add(shift);}
+   if(done){desiredView=null;anchor=null;}
+ }
+ if(held.size){const dx=Number(held.has('d'))-Number(held.has('a')), dz=Number(held.has('s'))-Number(held.has('w'));
+   const a=controls.getAzimuthalAngle(), step=view()*delta*.85/(Math.hypot(dx,dz)||1);
+   const shift=vector(dx*Math.cos(a)+dz*Math.sin(a),0,-dx*Math.sin(a)+dz*Math.cos(a)).multiplyScalar(step);
+   camera.position.add(shift);controls.target.add(shift);anchor=null;dirty=true;
+ }
+ controls.update(delta);
+ if(!animation&&time-lastCheck>160){lastCheck=time;trackDetail();}
+ if(software&&time-lastRender<50)return;
+ if(groups.traffic?.visible&&!overviewMode){for(const car of cars){let t=(time*.001*car.speed+car.offset)%1;const p=car.curve.getPoint(t),tangent=car.curve.getTangent(t);car.g.position.copy(p);car.g.rotation.y=Math.atan2(tangent.x,tangent.z);}dirty=true;}
+ if(dirty||controls.autoRotate){if(software)softwareRender();else renderer.render(scene,camera);updateLabels();dirty=false;}lastRender=time;
+}
+async function init(){try{
+ try{renderer=new THREE.WebGLRenderer({antialias:true,alpha:false});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.outputColorSpace=THREE.SRGBColorSpace;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.08;renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.setClearColor(colors.water);}catch(error){software=true;const canvas=document.createElement('canvas'),ctx=canvas.getContext('2d');if(!ctx)throw new Error('This browser cannot create a drawing canvas.');renderer={domElement:canvas,ctx,ratio:Math.min(devicePixelRatio,1.25),setSize(w,h){canvas.width=w*this.ratio;canvas.height=h*this.ratio;canvas.style.width=w+'px';canvas.style.height=h+'px';}};$('renderer-status').textContent='Three.js · software view';}
+ renderer.domElement.setAttribute('aria-label','Explore Mauritius: WASD to move, drag to rotate, point and scroll to zoom');renderer.domElement.tabIndex=0;host.append(renderer.domElement);controls=new OrbitControls(camera,renderer.domElement);controls.enableDamping=false;controls.screenSpacePanning=false;controls.maxPolarAngle=Math.PI*.43;controls.minPolarAngle=.001;controls.minZoom=.35;controls.maxZoom=18;controls.autoRotateSpeed=.4;controls.addEventListener('change',()=>dirty=true);controls.addEventListener('start',()=>{animation=null;desiredView=null;anchor=null;});
+ renderer.domElement.addEventListener('wheel',e=>{
+   e.preventDefault();e.stopImmediatePropagation();
+   const box=renderer.domElement.getBoundingClientRect();
+   pointer.set((e.clientX-box.left)/box.width*2-1,1-(e.clientY-box.top)/box.height*2);
+   raycaster.setFromCamera(pointer,camera);
+   const hit=raycaster.ray.intersectPlane(new THREE.Plane(vector(0,1,0),-controls.target.y),new THREE.Vector3());
+   queueZoom(Math.exp(THREE.MathUtils.clamp(e.deltaY*(e.deltaMode===1?16:e.deltaMode===2?box.height:1)*.0025,-1,1)),hit);
+ },{capture:true,passive:false});
+ document.addEventListener('keydown',e=>{
+   if(!/^[wasd]$/i.test(e.key)||e.ctrlKey||e.metaKey||e.altKey||e.target.closest?.('input,select,textarea,[contenteditable=true]')||$('about').open)return;
+   e.preventDefault();animation=null;held.add(e.key.toLowerCase());
+ });
+ document.addEventListener('keyup',e=>held.delete(e.key.toLowerCase()));
+ window.addEventListener('blur',()=>held.clear());
+ document.addEventListener('visibilitychange',()=>held.clear());
+ scene.add(new THREE.HemisphereLight('#fffbe6','#7d8f6a',1.9));sun=new THREE.DirectionalLight('#fff7d7',2.0);sun.position.set(-100,250,140);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-280;sun.shadow.camera.right=280;sun.shadow.camera.top=280;sun.shadow.camera.bottom=-280;sun.shadow.camera.near=1;sun.shadow.camera.far=1700;sun.shadow.bias=-.0003;scene.add(sun);scene.add(sun.target);loadTextures();
+ const response=await fetch(assets+'mauritius-osm.json');if(!response.ok)throw new Error('The OpenStreetMap dataset could not be loaded. Please reload.');data=await response.json();
+ try{const terrainResponse=await fetch(assets+'terrain-mesh.json');terrainMeshes=terrainResponse.ok?await terrainResponse.json():null;}catch(error){terrainMeshes=null;}
+ tileIndex=new Set((await (await fetch(assets+'tiles/index.json')).json()).keys);setupInteraction();goRegion('port-louis',false);$('world-status').textContent='Building close-up · Port Louis';$('loading').hidden=true;requestAnimationFrame(tick);
+ }catch(e){$('loading').hidden=true;$('error').hidden=false;$('error-message').textContent=e.message;console.error(e);}}
+init();
+
+// Supported smoke-test state, separate from geographic accuracy claims.
+window.__MU_TEST__=()=>({region:current?.id||null,overview:overviewMode,view:view(),target:controls?.target.toArray(),roamKey,dem:demActive,theme:themeId,cameraMode,span,zoom:camera.zoom,focus:current?focusCache.get(current.id):null,buildingHits:buildingHits.length,roads:overviewMode?data.mainRoads.length:(roamingRegion??current)?.roads.length||0,software});

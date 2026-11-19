@@ -10,7 +10,14 @@ test('production assets and textures work under the GitHub Pages project path', 
   const outDir = await mkdtemp(join(tmpdir(), 'mauritius-pages-'));
   try {
     await build({ logLevel: 'silent', build: { outDir, emptyOutDir: true } });
-    const html = await readFile(join(outDir, 'index.html'), 'utf8');
+    const explorer = await readFile(join(outDir, 'index.html'), 'utf8');
+    const entry = explorer.match(/<script[^>]+src="([^"]+)"/)?.[1];
+    assert.ok(entry?.startsWith(base) && explorer.includes('id="world"'));
+    const bundle = await readFile(join(outDir, entry.slice(base.length)), 'utf8');
+    assert.ok(bundle.includes(base + 'explorer/'));
+    for (const asset of ['tiles/index.json','mauritius-osm.json','terrain-mesh.json','textures/asphalt.png'])
+      assert.ok((await stat(join(outDir,'explorer',asset))).isFile());
+    const html = await readFile(join(outDir, 'classic.html'), 'utf8');
     const assets = [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map(match => match[1]);
     assert.ok(assets.some(asset => asset.endsWith('.js')), 'JavaScript entry exists');
     assert.ok(assets.some(asset => asset.endsWith('.css')), 'stylesheet exists');
