@@ -10,7 +10,11 @@ const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const state=()=>ev('window.__MU_TEST__?.()');
 await send('Runtime.enable');await send('Page.navigate',{url:process.env.APP_URL||'http://127.0.0.1:4173/mauritius-3D-openworld/'});
 let s;for(let i=0;i<120;i++){await sleep(250);s=await state();if(s?.region)break;}
-assert.ok(s?.buildingHits);console.log('initial',s.view,s.buildingHits);
+assert.ok(s?.buildingHits);
+for(let i=0;i<100;i++){await sleep(200);s=await state();if(s.roamKey&&s.buildingHits>360)break;}
+assert(s.buildingHits>360,'Town centre must load beyond the sparse 360-building preset');
+assert(s.cachedTiles<=48,'Decoded tile cache must remain bounded');
+console.log('streamed initial',s.view,s.buildingHits,s.cachedTiles);
 await ev("document.getElementById('overview').click()");await sleep(1400);
 s=await state();assert(s.overview&&s.view>=7500);console.log('overview',s.view);
 const samples=await ev(`(async()=>{const c=document.querySelector('#world canvas');const samples=[];c.dispatchEvent(new WheelEvent('wheel',{deltaY:-400,clientX:innerWidth/2,clientY:innerHeight/2,cancelable:true}));for(let i=0;i<10;i++){await new Promise(requestAnimationFrame);samples.push(__MU_TEST__().view)}return samples})()`);console.log('wheel samples',samples);assert(new Set(samples).size>=3);

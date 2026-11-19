@@ -26,7 +26,7 @@ export class TerrainCache {
  key(z,x,y){return `${z}/${x}/${y}`;}
  async get(z,x,y){const key=this.key(z,x,y);if(this.data.has(key))return this.data.get(key);
   if(this.pending.has(key))return this.pending.get(key);
-  const task=loadImageTile(z,x,y).catch(()=>null).then(tile=>{this.pending.delete(key);this.data.set(key,tile);if(tile)this.available=true;return tile;});
+  const task=loadImageTile(z,x,y).catch(()=>null).then(tile=>{this.pending.delete(key);if(tile)this.data.set(key,tile);while(this.data.size>24)this.data.delete(this.data.keys().next().value);if(tile)this.available=true;return tile;});
   this.pending.set(key,task);return task;
  }
  async prime(bounds,zoom=10){this.zoom=zoom;

@@ -2,7 +2,7 @@
 
 Explore Mauritius in 3D, from a whole-island overview to individual mapped buildings. Point and scroll for smooth zoom, use WASD to travel, and drag to orbit. The four towns are shortcuts rather than travel boundaries.
 
-Nearby roads and buildings load from bundled OpenStreetMap tiles, not a live Overpass query. Coverage varies; the free-roam terrain is flat, buildings are illustrated, and this is not panoramic street photography.
+Nearby roads and buildings load from bundled OpenStreetMap tiles, not a live Overpass query. Coverage varies; buildings are illustrated, and this is not panoramic street photography.
 
 **Website:** [Explore Mauritius in 3D](https://VincentChuWaiChow.github.io/mauritius-3D-openworld/)
 Local source changes are not live until separately deployed.
@@ -20,6 +20,16 @@ npm run preview
 ```
 
 Open the Vite URL, normally `http://localhost:5173/mauritius-3D-openworld/`.
+## Elevation
+
+With **Real DEM terrain (online)** enabled, the overview and street views share a
+coarse OSM-clipped terrain mesh. Road ribbons are split at terrain triangle
+boundaries and lifted above that same surface; building foundations use its
+heights. A bounded z10 Mapzen DEM request loads on demand and is reused while
+navigating. Failed requests fall back to flat terrain and can be retried by
+toggling the checkbox. Terrain detail is currently fixed, not a high-resolution
+streaming terrain system; buildings and streets stream independently.
+
 ## Free-roam explorer
 
 The default entry uses `src/explorer/` and `public/explorer/`. To regenerate the street tiles from a Mauritius OSM extract with pyosmium installed, run `python scripts/build_street_tiles.py mauritius.osm.pbf public/explorer/tiles` into an empty output directory. The index records attribution and the input checksum. For a browser interaction check against the production preview, run `node scripts/check-explorer-browser.mjs` with a dedicated headless Chrome debugger on port 9238.

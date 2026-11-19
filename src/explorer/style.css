@@ -10,3 +10,72 @@
 #focus-building{display:block;background:#278663;color:white;border-radius:9px;padding:10px 12px;margin:12px 0;font-size:11px;font-weight:700}
 #detail{max-height:calc(100vh - 180px);overflow:auto}
 @media(max-width:600px){.right-tools #close-view,.right-tools #district-view{font-size:18px}.layers{top:394px;right:15px}}
+
+/* Adjust panel backgrounds only: text and controls remain fully opaque. */
+:root{--panel-alpha:1}
+header,footer,.region-card,.right-tools,#layers-panel,#detail,.credits,.place-search{
+ background:rgba(255,254,248,var(--panel-alpha));backdrop-filter:none
+}
+.place-search{position:absolute;z-index:8;left:30px;top:130px;width:280px;padding:16px;border-radius:14px;box-shadow:0 5px 20px #234c421a}
+.place-search label{display:block;font-weight:700;margin-bottom:8px}
+.search-row{display:flex;gap:6px}
+#place-query{width:100%;min-width:0;padding:10px;border:1px solid #b9cbbc;border-radius:7px;background:#fffef8;color:var(--ink);font:inherit}
+.search-row button{background:var(--green);color:white;padding:8px 12px;border-radius:7px}
+#search-status{font-size:11px;line-height:1.4;margin:8px 0 0}
+#place-results{list-style:none;padding:0;margin:10px 0 0;max-height:36vh;overflow:auto;background:var(--cream);border-radius:8px}
+#place-results button{display:block;width:100%;padding:10px;text-align:left;background:var(--cream);border-bottom:1px solid #dfe8dc}
+#place-results button:hover,#place-results button:focus-visible{background:#dcebdc}
+.region-card{top:285px;padding:18px;border-radius:14px;width:280px;box-shadow:0 5px 20px #234c421a}
+#panel-transparency{width:100%}
+#transparency-value{margin-left:auto}
+@media(max-width:600px){
+ .place-search{top:90px;left:14px;width:calc(100% - 85px);padding:12px}
+ .region-card{top:235px;left:14px;width:calc(100% - 85px);padding:12px}
+ .region-card p,.region-card .region-foot{display:none}
+ .region-card h1{font-size:24px;margin:5px 0}
+}
+
+/* One flow owns the left-side tools. Inspection replaces the place summary. */
+.explore-rail{
+ position:absolute;z-index:7;top:130px;left:30px;width:300px;
+ display:flex;flex-direction:column;gap:12px;
+ max-height:calc(100dvh - 330px);overflow-y:auto;
+ scrollbar-width:thin;scrollbar-color:#73947f #fffef8;
+ border-radius:14px;
+}
+.explore-rail .place-search,.explore-rail .region-card,.explore-rail #detail{
+ position:relative;inset:auto;transform:none;width:100%;max-width:none;
+ max-height:none;flex:none;margin:0;box-shadow:none;overflow:visible;
+}
+.explore-rail .place-search{z-index:auto;padding:20px}
+.explore-rail .place-search label{font:600 22px 'Outfit',sans-serif;letter-spacing:-.02em}
+.explore-rail .region-card,.explore-rail #detail{padding:24px}
+.explore-rail:has(#detail:not([hidden])) .region-card{display:none}
+.explore-rail #detail h2{padding-right:24px;font-size:28px;line-height:1.15}
+.explore-rail #detail p{font-size:13px;color:var(--ink);line-height:1.6}
+.explore-rail #close-detail{width:40px;height:40px;right:8px;top:8px}
+.explore-rail #focus-building{font-size:13px;min-height:44px;width:100%}
+.explore-rail #building-link{display:inline-block;font-size:12px;padding:8px 0;text-underline-offset:3px}
+.explore-rail .eyebrow{display:none}
+.explore-rail #place-results{max-height:28dvh}
+.explore-rail #search-status{color:var(--ink)}
+.explore-rail input::placeholder{color:#4e7562}
+.explore-rail :focus-visible{outline:2px solid var(--green);outline-offset:2px}
+@media(max-width:600px){
+ .explore-rail{top:90px;left:14px;width:calc(100% - 86px);max-height:calc(100dvh - 295px);gap:8px}
+ .explore-rail .place-search{padding:14px}
+ .explore-rail .place-search label{font-size:20px}
+ .explore-rail .region-card,.explore-rail #detail{padding:18px}
+ .explore-rail #detail h2{font-size:25px}
+ .explore-rail #place-results{max-height:24dvh}
+}
+@media(max-width:600px){
+ #layers-button{width:44px;height:44px;padding:4px;font-size:0}
+ #layers-button span{display:none}
+ #layers-button::after{content:"Style";font-size:11px}
+ #layers-panel{width:calc(100vw - 30px);max-height:calc(100dvh - 250px)}
+ body:has(#layers-panel:not([hidden])) .explore-rail{visibility:hidden}
+}
+@media(max-width:600px){
+ #layers-panel{position:fixed;top:90px;right:15px;bottom:200px;margin:0;max-height:none}
+}
