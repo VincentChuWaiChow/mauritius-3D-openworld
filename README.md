@@ -94,3 +94,46 @@ Browser evidence for this recovery is under `.workflow/ultracode/world-recovery/
 - Live standard tiles follow the [OSMF tile policy](https://operations.osmfoundation.org/policies/tiles/).
 - Live elevation: [Mapzen terrain via AWS Open Data](https://registry.opendata.aws/terrain-tiles/).
 - Application code: MIT. Material PNGs are original procedural textures.
+
+### Chamarel scenery (illustrative)
+
+Search **7 colors**, **Seven Coloured Earth**, or **Chamarel Waterfall** for
+original procedural 3D scenery. Searching **Chamarel** still selects the village;
+choose the named attraction from the results instead. Dunes, cliffs, basin and
+broadleaf forest are artistic reconstructions, not photogrammetry or surveyed
+geology. The waterfall is raised illustrative relief above the shared terrain,
+not a DEM excavation. Locations use OSM way 133131985 and node 248643391 from the
+local extract. Reference: https://chamarel7colouredearth.com/experiences/geopark/.
+No Google imagery is embedded or used as textures.
+
+The scenery generator is a separate lazy-loaded bundle. Only nearby detail views
+construct meshes (about 4,000–5,300 triangles per site); leaving the area or returning
+to island view disposes their GPU geometry/materials. **Trees & parks** also hides
+scenery. WebGL animates small waterfall highlights; software rendering and reduced
+motion retain static water. Native-device frame rate and long-session memory have
+not been benchmarked.
+
+### More landmark scenery
+
+| Search | Scenery | Verified OSM anchor | Reference |
+|---|---|---|---|
+| **Le Morne Brabant** | Asymmetric basalt massif and wooded shoulders | Peak `n828423453`, 57.3213024, -20.4540752 | [UNESCO](https://whc.unesco.org/en/list/1259/) |
+| **Trou aux Cerfs** / **Curepipe volcano** | Forested bowl and low central floor; no lava | Volcano `n1891384067`, 57.5114969, -20.3179077 | [Curepipe Municipality](https://www.municipal-curepipe.org/management-of-parks-gardens-and-green-spaces/) |
+| **Ganga Talao** / **Grand Bassin** | Level lake, wooded banks and decorative steps/pavilion | Outer-polygon centroid of lake `r1789151`, 57.4921158, -20.4181020 | [Mauritius Telecom tourism](https://www.myt.mu/tourist-tour/explore-info/grand-bassin-ganga-talao) |
+
+Anchors come from the local OSM extract, not from the model shapes. These are
+original illustrative scenes, not survey-accurate footprints, geology, temples or
+statues. Mountain relief starts at the surrounding foothill datum and takes the
+higher of model relief and existing ground, avoiding double-added summit height.
+The crater and lake sit on level raised foundations with ground-connected skirts;
+they do **not** excavate or replace the DEM. Existing mapped buildings/roads remain.
+
+Each new model has fewer than 6,000 triangles. Nearby scenery can remain visible
+when street tiles fall back to the overview terrain; whole-island zoom unloads it.
+Search **Le Morne Brabant**, not just **Le Morne** (which retains the village result).
+
+Checks: `npm test`, `npm run build`, and `scripts/check-scenery-browser.mjs` against
+a local preview with `APP_URL` and `CHROME_DEBUG_URL`. The browser check covers all
+five landmarks, search aliases, distant-scene removal, bounded tile cache, the
+Trees & parks toggle, flat fallback, and whole-island cleanup. It writes inspection
+screenshots to `/tmp/mu-<osm-id>.png`. This is not a native-GPU performance benchmark.
