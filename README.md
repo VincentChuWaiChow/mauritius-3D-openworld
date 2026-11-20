@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./.github/assets/mauritius-life-logo.webp" alt="Mauritius Life — Explore, Discover, Preserve" width="720">
+</p>
+
 # Mauritius Life — a little world to explore
 
 Explore Mauritius in 3D, from a whole-island overview to individual mapped buildings. Point and scroll for smooth zoom, use WASD to travel, and drag to orbit. The four towns are shortcuts rather than travel boundaries.
