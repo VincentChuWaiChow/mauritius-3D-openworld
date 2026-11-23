@@ -85,3 +85,12 @@ test('malformed binary data is an error rather than empty coverage', async t => 
   t.mock.method(globalThis, 'fetch', async () => new Response(new Uint8Array([255])));
   await assert.rejects(readTraffic(tile, 'fixture'));
 });
+
+test('cancellation after receiving headers is not mistaken for empty coverage', async t => {
+  const controller = new AbortController();
+  t.mock.method(globalThis, 'fetch', async () => {
+    controller.abort();
+    return new Response(new Uint8Array());
+  });
+  await assert.rejects(readTraffic(tile, 'fixture', controller.signal), {name: 'AbortError'});
+});

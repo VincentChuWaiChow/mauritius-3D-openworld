@@ -106,7 +106,10 @@ scene.add(mapGroup, buildingGroup, vectorGroup);
 const groundShadowMaterial = new THREE.ShadowMaterial({
   color: '#132d29', opacity: .28, depthWrite: false,
 });
-const atlases = loadAtlases();
+// Keep the shader's map path active without downloading atlases at 0% detail.
+const blankAtlas = new THREE.DataTexture(new Uint8Array([255, 255, 255, 255]), 1, 1);
+blankAtlas.needsUpdate = true;
+let atlases = null;
 
 // Uniform references are shared across all tile shaders. Recoloring a map
 // only updates these colors; it never requires another tile download.
@@ -119,7 +122,7 @@ const tileUniforms = {
   uRoad: { value: new THREE.Color(palette.roads) },
   uOriginal: { value: palette.originalTiles ? 1 : 0 },
   uIllustrated: { value: palette.illustrated ? 1 : 0 },
-  uSurfaceAtlas: { value: atlases.surface },
+  uSurfaceAtlas: { value: blankAtlas },
   uTextureStrength: { value: textureStrength },
   uChamarel: { value: new THREE.Vector2() },
 };
@@ -144,7 +147,15 @@ ocean.rotation.x = -Math.PI / 2;
 ocean.position.y = -2;
 scene.add(ocean);
 
-const buildingMaterial = createTexturedBuildingMaterial(atlases.buildings, palette);
+const buildingMaterial = createTexturedBuildingMaterial(blankAtlas, palette);
+function ensureAtlases() {
+  if (atlases) return;
+  atlases = loadAtlases();
+  tileUniforms.uSurfaceAtlas.value = atlases.surface;
+  buildingMaterial.map = atlases.buildings;
+  buildingMaterial.needsUpdate = true;
+  blankAtlas.dispose();
+}
 const tileLoader = new THREE.TextureLoader();
 tileLoader.setCrossOrigin('anonymous');
 
@@ -691,6 +702,7 @@ document.querySelector('#relief').addEventListener('input', event => {
 });
 document.querySelector('#surfaceDetail').addEventListener('input', event => {
   textureStrength = Number(event.target.value) / 100;
+  if (textureStrength > 0) ensureAtlases();
   surfaceOutput.textContent = `${Math.round(textureStrength * 100)}%`;
   tileUniforms.uTextureStrength.value = textureStrength * (paletteName === 'midnight' ? .30 : 1);
   buildingMaterial.userData.textureStrength.value = textureStrength * (paletteName === 'midnight' ? .4 : 1);

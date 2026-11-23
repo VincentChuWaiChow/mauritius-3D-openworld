@@ -73,7 +73,7 @@ function materialFor(group,color){
    pattern=wall>=0?['stucco','window-grid','masonry','stucco'][wall]:roof>=0?['roof-terracotta','roof-pale','roof-metal','roof-concrete','roof-pale','roof-terracotta'][roof]:null;
  }
  const options={color,side:THREE.DoubleSide,roughness:.94,metalness:.0,flatShading:true};
- if(pattern&&textures.has(pattern)){options.map=textures.get(pattern);}
+ if(pattern&&!software)options.map=textureFor(pattern);
  return new THREE.MeshStandardMaterial(options);
 }
 function compile(g){for(const [color,positions]of g.userData.buckets||[]){
@@ -93,13 +93,11 @@ function compile(g){for(const [color,positions]of g.userData.buckets||[]){
  const mesh=new THREE.Mesh(geo,materialFor(g,color));mesh.userData.color=color;
  mesh.castShadow=g.name==='buildings';mesh.receiveShadow=g.name==='buildings'||g.name==='land';g.add(mesh);
  }delete g.userData.buckets;}
-function loadTextures(){
- const names=['stucco','window-grid','masonry','roof-concrete','roof-terracotta','roof-metal','roof-pale','grassland','coral-sand','asphalt'];
- const loader=new THREE.TextureLoader();for(const name of names){
-  const tex=loader.load(assets+'textures/'+name+'.png',()=>{dirty=true;},undefined,()=>{dirty=true;});
-  tex.colorSpace=THREE.SRGBColorSpace;tex.wrapS=tex.wrapT=THREE.RepeatWrapping;
-  tex.anisotropy=4; textures.set(name,tex);
- }
+function textureFor(name){
+ if(textures.has(name))return textures.get(name);
+ const tex=new THREE.TextureLoader().load(assets+'textures/'+name+'.png',()=>{dirty=true;},undefined,()=>{dirty=true;});
+ tex.colorSpace=THREE.SRGBColorSpace;tex.wrapS=tex.wrapT=THREE.RepeatWrapping;
+ tex.anisotropy=4;textures.set(name,tex);return tex;
 }
 function group(name){const g=new THREE.Group();g.name=name;root.add(g);groups[name]=g;return g;}
 function tree(g,x,z,size=1,seed=0){if(sceneryVegetationArea({x,z}))return;const floor=groundY({x,z});box(g,'#887b51',x,floor+.1,z,.2*size,1.1*size,.2*size);cone(g,['#3f8356','#548e56','#609a5b','#408c65'][seed%4],x,floor+.75*size,z,.85*size,1.5*size,5);cone(g,'#76a966',x,floor+1.5*size,z,.6*size,1.1*size,5);}
@@ -190,7 +188,8 @@ function buildWorld(region,isOverview=false){clearWorld();if(region.id!=='free')
  const polys=data.land.map(r=>r.slice(0,-1).map(fromGeo));
  const currentMesh=terrainMeshes?.overview;
  if(demActive&&currentMesh){
-   const g=buildTerrainGeometry(THREE,currentMesh,surface,colors);
+   // An opaque THREE namespace argument prevents pruning its unused exports.
+   const g=buildTerrainGeometry({BufferGeometry:THREE.BufferGeometry,Float32BufferAttribute:THREE.Float32BufferAttribute,Color:THREE.Color},currentMesh,surface,colors);
    const mesh=new THREE.Mesh(g,new THREE.MeshStandardMaterial({vertexColors:true,flatShading:true,roughness:1,side:THREE.DoubleSide}));
    mesh.receiveShadow=true;mesh.userData.color=colors.land;land.add(mesh);
  }else for(const p of polys)polygon(land,colors.land,p,0);
@@ -397,8 +396,19 @@ async function trackDetail(){
 }
 let searchLocation=null;
 function setupSearch(){
- let places=[],matches=[];
+ let places=null,matches=[],placesLoading=null;
  const input=$('place-query'),results=$('place-results'),status=$('search-status');
+ function loadPlaces(){
+  if(places)return Promise.resolve(true);
+  if(!placesLoading){
+   status.textContent='Loading place search…';
+   placesLoading=fetch(assets+'places.json').then(r=>{if(!r.ok)throw Error();return r.json();})
+    .then(d=>{places=withLandmarks(d.places);return true;})
+    .catch(()=>{status.textContent='Place search unavailable. Focus or type to retry.';return false;})
+    .finally(()=>{placesLoading=null;});
+  }
+  return placesLoading;
+ }
  function choose(place){
   searchLocation=place;streetRequest?.abort();roamGeneration++;roamKey='';roamingRegion=null;
   const target=fromGeo(place.center);target.y=groundY(target);
@@ -406,8 +416,9 @@ function setupSearch(){
   $('region-name').textContent=place.name;$('region-description').textContent=place.description??'Explore the surrounding streets and landscape with WASD or the mouse.';
   $('region-tag').textContent=place.kind;status.textContent='Exploring '+place.name;
  }
- function update(){
-  results.replaceChildren();matches=searchPlaces(places,input.value);
+ async function update(){
+  if(input.value.trim().length>=2&&!await loadPlaces()){matches=[];results.hidden=true;return;}
+  results.replaceChildren();matches=searchPlaces(places??[],input.value);
   results.hidden=!matches.length;
   status.textContent=input.value.trim().length<2?'Type at least two characters':matches.length?matches.length+' matching places':'No mapped place found. Try a nearby town or village.';
   for(const place of matches){
@@ -416,10 +427,10 @@ function setupSearch(){
   }
  }
  input.addEventListener('input',update);
+ input.addEventListener('focus',async()=>{if(!places&&await loadPlaces())void update();});
  input.addEventListener('keydown',e=>{if(e.key==='ArrowDown'&&!results.hidden){e.preventDefault();results.querySelector('button')?.focus();}});
  $('place-search-form').onsubmit=e=>{e.preventDefault();if(matches[0])choose(matches[0]);};
  document.querySelector('.place-search').addEventListener('keydown',e=>{if(e.key==='Escape'){results.hidden=true;input.focus();}});
- fetch(assets+'places.json').then(r=>{if(!r.ok)throw Error();return r.json();}).then(d=>{places=withLandmarks(d.places);update();}).catch(()=>{status.textContent='Place search unavailable. Reload to retry.';});
  const slider=$('panel-transparency');
  function transparency(){document.documentElement.style.setProperty('--panel-alpha',panelAlpha(slider.value));$('transparency-value').value=slider.value+'%';}
  slider.oninput=transparency;transparency();
@@ -486,7 +497,7 @@ async function init(){try{
  document.addEventListener('keyup',e=>held.delete(e.key.toLowerCase()));
  window.addEventListener('blur',()=>held.clear());
  document.addEventListener('visibilitychange',()=>{held.clear();updateTraffic();});
- scene.add(new THREE.HemisphereLight('#fffbe6','#7d8f6a',1.9));sun=new THREE.DirectionalLight('#fff7d7',2.0);sun.position.set(-100,250,140);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-280;sun.shadow.camera.right=280;sun.shadow.camera.top=280;sun.shadow.camera.bottom=-280;sun.shadow.camera.near=1;sun.shadow.camera.far=1700;sun.shadow.bias=-.0003;scene.add(sun);scene.add(sun.target);loadTextures();
+ scene.add(new THREE.HemisphereLight('#fffbe6','#7d8f6a',1.9));sun=new THREE.DirectionalLight('#fff7d7',2.0);sun.position.set(-100,250,140);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-280;sun.shadow.camera.right=280;sun.shadow.camera.top=280;sun.shadow.camera.bottom=-280;sun.shadow.camera.near=1;sun.shadow.camera.far=1700;sun.shadow.bias=-.0003;scene.add(sun);scene.add(sun.target);
  const response=await fetch(assets+'mauritius-osm.json');if(!response.ok)throw new Error('The OpenStreetMap dataset could not be loaded. Please reload.');data=await response.json();
  try{const terrainResponse=await fetch(assets+'terrain-mesh.json');terrainMeshes=terrainResponse.ok?await terrainResponse.json():null;}catch(error){terrainMeshes=null;}
  tileIndex=new Set((await (await fetch(assets+'tiles/index.json')).json()).keys);setupInteraction();goRegion('port-louis',false);$('world-status').textContent='Building close-up · Port Louis';$('loading').hidden=true;requestAnimationFrame(tick);

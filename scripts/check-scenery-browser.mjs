@@ -15,6 +15,7 @@ await sleep(1500);
 await send('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:1,mobile:false});
 for(const [query,kind] of [['7 colors','w133131985'],['Chamarel Waterfall','n248643391'],['Le Morne Brabant','n828423453'],['Trou aux Cerfs','n1891384067'],['Grand Bassin','r1789151']]){
  await ev(`document.getElementById('place-query').value=${JSON.stringify(query)};document.getElementById('place-query').dispatchEvent(new Event('input'))`);
+ for(let i=0;i<100&&!(await ev("document.querySelectorAll('#place-results button').length"));i++)await sleep(50);
  assert((await ev("document.querySelectorAll('#place-results button').length"))>0);
  await ev("document.querySelector('#place-results button').click()");
  let s;for(let i=0;i<80;i++){await sleep(200);s=await state();if(s.scenery.includes(kind)&&s.sceneryMeshes>0)break;}

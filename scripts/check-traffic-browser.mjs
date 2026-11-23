@@ -21,7 +21,7 @@ const tab = await (await fetch(debuggerURL + '/json/new?about:blank', {method: '
 const ws = new WebSocket(tab.webSocketDebuggerUrl);
 await new Promise(resolve => ws.onopen = resolve);
 let id = 0;
-const pending = new Map(), errors = [];
+const pending = new Map(), errors = [], requests = [];
 ws.onmessage = ({data}) => {
   const message = JSON.parse(data);
   if (message.id) {
@@ -32,6 +32,7 @@ ws.onmessage = ({data}) => {
     else request.resolve(message.result);
   }
   if (message.method === 'Runtime.exceptionThrown') errors.push(message.params.exceptionDetails.text);
+  if (message.method === 'Network.requestWillBeSent') requests.push(new URL(message.params.request.url).pathname);
 };
 const send = (method, params = {}) => new Promise((resolve, reject) => {
   const key = ++id;
@@ -51,9 +52,11 @@ const waitFor = async (expression, label) => {
 };
 const toggle = () => ev("document.getElementById('flow-enabled').click()");
 const mock = () => ev('({calls:__trafficMock.calls.length,aborted:__trafficMock.aborted})');
+const decoderRequests = () => requests.filter(path => /(?:vector[-_]tile|\/pbf)[^/]*\.js$/.test(path));
 try {
   await send('Page.enable');
   await send('Runtime.enable');
+  await send('Network.enable');
   await send('Page.addScriptToEvaluateOnNewDocument', {source: `
     const originalFetch = window.fetch.bind(window), originalNow = Date.now;
     window.__trafficMock = {calls: [], pending: [], aborted: 0, mode: 200, offset: 0};
@@ -66,6 +69,7 @@ try {
         options.signal?.addEventListener('abort', () => mock.aborted++, {once: true});
         const response = () => new Response(Uint8Array.from(atob(${JSON.stringify(body)}), c => c.charCodeAt(0)));
         if (mock.mode === 'hold') return new Promise(resolve => mock.pending.push(() => resolve(response())));
+        if (mock.mode === 'empty') return new Response(new Uint8Array());
         return mock.mode === 200 ? response() : new Response(null, {status: mock.mode});
       }
       if (url.origin !== location.origin) return new Response(null, {status: 503});
@@ -76,13 +80,19 @@ try {
   await waitFor('window.__MU_TEST__?.().region', 'explorer initialization');
   await sleep(1200);
   assert.equal((await mock()).calls, 0, 'Traffic must be opt-in');
+  assert.equal(decoderRequests().length, 0, 'Traffic decoders must not load at startup');
   assert.equal(await ev("document.getElementById('flow-enabled').disabled"), process.env.EXPECT_TRAFFIC_TOKEN === '0');
   await waitFor("document.querySelector('#flow-credit img').complete", 'logo load');
   assert.ok(await ev("document.querySelector('#flow-credit img').naturalWidth > 0"),
     'Logo must be a decodable SVG: ' + await ev("JSON.stringify({src:document.querySelector('#flow-credit img').src,complete:document.querySelector('#flow-credit img').complete})"));
   if (process.env.EXPECT_TRAFFIC_TOKEN !== '0') {
+    await ev("__trafficMock.mode = 'empty'"); await toggle();
+    await waitFor("document.getElementById('flow-status').textContent.includes('No reported')", 'empty 200 coverage');
+    assert.equal(decoderRequests().length, 0, 'Empty responses must not download decoders');
+    await toggle(); await ev('__trafficMock.mode = 200');
     await toggle();
     await waitFor('__MU_TEST__().trafficLines === 1 && __MU_TEST__().trafficMeshes === 1', 'decoded ribbon');
+    assert(decoderRequests().length >= 2, 'A nonempty response must load both decoder modules');
     const vertices = await ev('__MU_TEST__().trafficVertices');
     assert(vertices > 0);
     assert.equal(await ev("document.getElementById('flow-credit').hidden"), false);

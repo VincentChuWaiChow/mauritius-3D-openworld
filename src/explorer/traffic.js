@@ -1,6 +1,3 @@
-import {VectorTile} from '@mapbox/vector-tile';
-import {PbfReader} from 'pbf';
-
 export const refreshMs = 8 * 60_000;
 export const congestionColors = Object.freeze({
   low: '#16865c', moderate: '#e5ac25', heavy: '#e86c29', severe: '#bd283f', closed: '#842476'
@@ -33,6 +30,13 @@ export async function readTraffic(tile, token, signal) {
   const response = await fetch(url, {signal});
   if (response.status === 204) return [];
   if (!response.ok) throw Error('Traffic unavailable (HTTP ' + response.status + ')');
-  const data = new VectorTile(new PbfReader(new Uint8Array(await response.arrayBuffer())));
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  signal?.throwIfAborted();
+  if (!bytes.length) return [];
+  const [{VectorTile}, {PbfReader}] = await Promise.all([
+    import('@mapbox/vector-tile'), import('pbf')
+  ]);
+  signal?.throwIfAborted();
+  const data = new VectorTile(new PbfReader(bytes));
   return trafficLines(data.layers.traffic, tile);
 }

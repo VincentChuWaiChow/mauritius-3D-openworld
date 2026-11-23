@@ -86,6 +86,28 @@ The snapshot script makes no network requests. It joins coastline segments by OS
 
 `npm test` covers data timeouts, cancellation and validation, concurrent DEM loading, snapshot integrity, geometry/disposal, palette contracts and GitHub Pages asset paths. `npm run build` creates `dist/`.
 
+### Build chunks and on-demand assets
+
+The lockfile uses Vite 8.3.8; CI runs Node 24. Both HTML entries share separate
+Three.js core, renderer and controls chunks. Rendering still needs these chunks
+at startup. Scenery loads on approach, while traffic decoding loads only after
+an enabled overlay receives non-empty data. Without a token, the production
+build removes the unused traffic feature.
+
+Place search fetches its index on focus or typing, with cached results and retry
+after failure. Explorer PNGs are cached by material demand (the initial Port Louis
+view currently uses all ten). Classic-view texture atlases load only when
+**Surface texture** rises above 0%. Public map data and PNGs retain their names;
+they are fetched on demand, not converted into JavaScript chunks.
+
+Production tests inspect the emitted manifest: optional code must stay outside
+the eager dependency graph, each JS chunk is limited to 500 kB, and combined eager
+JS per entry is guarded at 625 kB so splitting cannot conceal bundle growth.
+With a local production preview and Chrome debugger running, use
+`APP_URL=<preview URL> CHROME_DEBUG_URL=<debugger URL> node scripts/check-lazy-assets-browser.mjs`
+to check network demand, search retry/Escape behavior and classic atlas loading.
+It blocks external fetches and does not measure native-device performance.
+
 Browser evidence for this recovery is under `.workflow/ultracode/world-recovery/` (local workflow artifacts, not application assets). It exercises real bundled data with external services blocked. Software WebGL checks do not prove native-GPU frame rate or mobile-device performance; visual approval remains a human check.
 
 ## Publication

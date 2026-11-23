@@ -9,7 +9,35 @@ test('production assets and textures work under the GitHub Pages project path', 
   const base = '/mauritius-3D-openworld/';
   const outDir = await mkdtemp(join(tmpdir(), 'mauritius-pages-'));
   try {
-    await build({ logLevel: 'silent', build: { outDir, emptyOutDir: true } });
+    await build({ logLevel: 'silent', define: { 'import.meta.env.VITE_MAPBOX_PUBLIC_TOKEN': JSON.stringify('pk.fixture') },
+      build: { outDir, emptyOutDir: true, manifest: true } });
+    const manifest = JSON.parse(await readFile(join(outDir, '.vite/manifest.json'), 'utf8'));
+    const eager = key => {
+      const seen = new Set();
+      function visit(id) {
+        if (seen.has(id)) return;
+        seen.add(id);
+        for (const dependency of manifest[id].imports || []) visit(dependency);
+      }
+      visit(key);
+      return seen;
+    };
+    const deferred = Object.entries(manifest).filter(([, chunk]) => chunk.isDynamicEntry);
+    for (const module of ['src/explorer/scenery.js', 'node_modules/@mapbox/vector-tile/index.js', 'node_modules/pbf/index.js']) {
+      const entry = deferred.find(([key, chunk]) => key === module || chunk.src === module);
+      assert.ok(entry, `${module} must be a real dynamic chunk`);
+      for (const page of ['index.html', 'classic.html'])
+        assert.ok(!eager(page).has(entry[0]), `${module} must not be imported eagerly by ${page}`);
+    }
+    for (const chunk of Object.values(manifest)) {
+      if (chunk.file.endsWith('.js'))
+        assert.ok((await stat(join(outDir, chunk.file))).size <= 500_000, `${chunk.file} exceeds the 500 kB chunk budget`);
+    }
+    for (const page of ['index.html', 'classic.html']) {
+      let bytes = 0;
+      for (const key of eager(page)) bytes += (await stat(join(outDir, manifest[key].file))).size;
+      assert.ok(bytes <= 625_000, `${page} eager JS grew beyond the 625 kB baseline guard: ${bytes}`);
+    }
     const explorer = await readFile(join(outDir, 'index.html'), 'utf8');
     const entry = explorer.match(/<script[^>]+src="([^"]+)"/)?.[1];
     assert.ok(entry?.startsWith(base) && explorer.includes('id="world"'));
