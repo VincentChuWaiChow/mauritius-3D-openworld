@@ -27,6 +27,32 @@ export class TerrainSurface {
    if(f.p.every((a,i)=>cross(a,f.p[(i+1)%3],p)>=-1e-7))return this.heightOn(f,p);
   return 0;
  }
+ // Clip centreline segments to the very same planes used by drape(). Keep
+ // separate pieces so missing terrain never creates an invisible pick bridge.
+ trace(points,lift=0){
+  const segments=[];
+  for(let i=1;i<points.length;i++){
+   const p=points[i-1],q=points[i];
+   if(Math.hypot(q[0]-p[0],q[1]-p[1])<1e-9)continue;
+   const candidates=new Set();
+   for(const key of this.keys([p,q]))for(const f of this.cells.get(key)??[])candidates.add(f);
+   for(const f of candidates){
+    let enter=0,exit=1;
+    for(let edge=0;edge<3;edge++){
+     const a=f.p[edge],b=f.p[(edge+1)%3],dp=cross(a,b,p),delta=cross(a,b,q)-dp;
+     if(Math.abs(delta)<1e-12){if(dp<-1e-9){exit=-1;break;}}
+     else if(delta>0)enter=Math.max(enter,-dp/delta);
+     else exit=Math.min(exit,-dp/delta);
+    }
+    if(exit-enter<=1e-9)continue;
+    segments.push([enter,exit].map(t=>{
+     const v=[p[0]+(q[0]-p[0])*t,p[1]+(q[1]-p[1])*t];
+     return [v[0],this.heightOn(f,v)+lift,v[1]];
+    }));
+   }
+  }
+  return segments;
+ }
  drape(points,lift,emit){
   const candidates=new Set();
   for(const key of this.keys(points))for(const f of this.cells.get(key)??[])candidates.add(f);

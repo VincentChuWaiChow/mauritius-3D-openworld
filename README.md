@@ -24,6 +24,24 @@ npm run preview
 ```
 
 Open the Vite URL, normally `http://localhost:5173/mauritius-3D-openworld/`.
+
+### Hot reload during development
+
+Keep `npm run dev` running and save files; no extra HMR package is needed.
+CSS updates apply immediately without resetting the map. Edits to
+`src/explorer/roads.js` hot-swap the search/picking helper and refresh open search
+results while preserving the camera, renderer and selected road. Other scene
+JavaScript and HTML changes trigger Vite's automatic full-page reload so old
+WebGL render loops and event handlers cannot accumulate. Use the dev URL, not
+`npm run preview` or the deployed website; neither provides HMR. Vite configuration
+changes can restart the dev server.
+
+To verify HMR, start a dedicated Chrome debugger on port 9239 and run
+`node scripts/check-hmr-browser.mjs`. The check starts its own loopback Vite server
+on port 5175, edits only a temporary source copy, blocks provider requests and
+cleans up its server/tab/files. `CHROME_DEBUG_URL` and `HMR_TEST_PORT` override
+those test defaults; the normal development server is not modified.
+
 ## Elevation
 
 With **Real DEM terrain (online)** enabled, the overview and street views share a
@@ -163,6 +181,41 @@ a local preview with `APP_URL` and `CHROME_DEBUG_URL`. The browser check covers 
 five landmarks, search aliases, distant-scene removal, bounded tile cache, the
 Trees & parks toggle, flat fallback, and whole-island cleanup. It writes inspection
 screenshots to `/tmp/mu-<osm-id>.png`. This is not a native-GPU performance benchmark.
+
+## Road discovery in the main explorer
+
+Search a road name and nearby town, for example **Royal Road Pointe aux Piments**.
+Results show approximate locality; choose a result when names repeat. Same-name
+components within the same locality also show coordinates and an OSM way ID.
+Selection frames the mapped component with a steady two-tone outline, one on-road
+arrow and a source link. Clear it with **Clear selected road**, Escape, a new
+place search or **Whole island**. Theme, terrain and streamed-tile rebuilds retain
+the selected identity. Mobile framing keeps the arrow below the search rail.
+
+In street view, hover an unobscured named road for one transient name/locality
+label. Dragging or leaving the map dismisses it. Touch users can tap a road or
+select search results; keyboard users can use Arrow Down/Up and Enter in results.
+Buildings retain picking priority. Reduced motion uses static selection without
+camera animation. This adds no permanent road-name labels or bloom dependency.
+
+The attributed [road index](public/explorer/roads/README.md) contains **6,504
+component records from 9,334 matched named ways**. Names come from OSM tags dated
+2026-11-23, joined by way ID to the existing geometry snapshot. Original street,
+building and terrain files are unchanged. “Near” is an approximate nearest mapped
+city/town/village, not an official address. The 33,219 ways absent from the tag
+join are omitted, not proven unnamed; coverage is incomplete. Shared-coordinate
+components are not proof of network connectivity. Bridge-deck heights are not
+reconstructed.
+
+The helper chunk and 1.74 MB name index load only on search/map interaction.
+Selected geometry loads from one of 32 buckets (largest about 91 kB); at most four
+buckets are retained. The existing decoded street-tile cache remains capped at
+48. Run `npm test`, `npm run build`, then
+`node scripts/check-road-browser.mjs` against a production preview on port 4173
+and dedicated Chrome debugger on port 9238. `APP_URL`, `CHROME_DEBUG_URL` and
+`ROAD_SCREENSHOT_PREFIX` override those defaults. The browser check blocks
+external provider fetches; native-device performance and live DEM/traffic
+accuracy are not established by it.
 
 ## Optional traffic overlay in the main explorer
 

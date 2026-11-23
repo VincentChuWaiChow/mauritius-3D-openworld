@@ -23,7 +23,7 @@ test('production assets and textures work under the GitHub Pages project path', 
       return seen;
     };
     const deferred = Object.entries(manifest).filter(([, chunk]) => chunk.isDynamicEntry);
-    for (const module of ['src/explorer/scenery.js', 'node_modules/@mapbox/vector-tile/index.js', 'node_modules/pbf/index.js']) {
+    for (const module of ['src/explorer/roads.js', 'src/explorer/scenery.js', 'node_modules/@mapbox/vector-tile/index.js', 'node_modules/pbf/index.js']) {
       const entry = deferred.find(([key, chunk]) => key === module || chunk.src === module);
       assert.ok(entry, `${module} must be a real dynamic chunk`);
       for (const page of ['index.html', 'classic.html'])
@@ -43,6 +43,7 @@ test('production assets and textures work under the GitHub Pages project path', 
     assert.ok(entry?.startsWith(base) && explorer.includes('id="world"'));
     const bundle = await readFile(join(outDir, entry.slice(base.length)), 'utf8');
     assert.ok(bundle.includes(base + 'explorer/'));
+    assert.doesNotMatch(bundle, /Road helper update failed|__vite__createHotContext/, 'development HMR hooks must not ship in production');
     for (const asset of ['tiles/index.json','mauritius-osm.json','terrain-mesh.json','textures/asphalt.png'])
       assert.ok((await stat(join(outDir,'explorer',asset))).isFile());
     const html = await readFile(join(outDir, 'classic.html'), 'utf8');
