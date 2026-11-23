@@ -29,6 +29,8 @@ jobs:
       - name: Test
         run: npm test
       - name: Build
+        env:
+          VITE_MAPBOX_PUBLIC_TOKEN: ${{ vars.VITE_MAPBOX_PUBLIC_TOKEN }}
         run: npm run build
       - name: Upload site
         uses: actions/upload-pages-artifact@v4

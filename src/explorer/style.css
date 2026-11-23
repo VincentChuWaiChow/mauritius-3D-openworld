@@ -79,3 +79,7 @@ header,footer,.region-card,.right-tools,#layers-panel,#detail,.credits,.place-se
 @media(max-width:600px){
  #layers-panel{position:fixed;top:90px;right:15px;bottom:200px;margin:0;max-height:none}
 }
+
+#flow-credit:not([hidden]) {position:fixed;z-index:5;right:8px;bottom:32px;background:#fff;color:#223633;padding:3px 6px;border-radius:4px;font:11px system-ui}
+#flow-credit img {vertical-align:middle}
+#flow-credit a {color:inherit}

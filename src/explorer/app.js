@@ -3,6 +3,7 @@ import {withLandmarks,nearbyLandmarks,sceneryVegetationArea} from './landmarks.j
 import {searchPlaces,panelAlpha} from './search.js';
 import {TerrainSurface} from './surface.js';
 import {TileStore,visibleTileKeys} from './streaming.js';
+import {trafficTile, readTraffic, refreshMs, congestionColors} from './traffic.js';
 import {ribbon,roadPass} from './road-ribbon.js';
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
@@ -127,8 +128,65 @@ function buildRoof(g,points,roof,wall,y,height,look){
  tri(g,wall,v(c,y+height),v(d,y+height),r(ridgeB));
 }
 function marker(name,icon,position,action){const el=document.createElement('button');el.className='pin';el.setAttribute('aria-label',name);el.innerHTML=icon+'<span></span>';el.querySelector('span').textContent=name;el.onclick=action;$('labels').append(el);markers.push({el,position});}
+const trafficToken = import.meta.env.VITE_MAPBOX_PUBLIC_TOKEN || '';
+let trafficRequest, trafficKey = '', nextTrafficRead = 0, trafficLines = [], trafficStatus = '';
+function drawTraffic() {
+ const layer = groups.flow;
+ if (!layer) return;
+ for (const mesh of layer.children) { mesh.geometry.dispose(); mesh.material.dispose(); }
+ layer.clear();
+ for (const {level, points} of trafficLines) {
+   const road = points.map(fromGeo);
+   // Provider line order is normalized for a positive screen-space right offset.
+   const shifted = road.map((p, i) => {
+     const a = road[Math.max(0,i-1)], b = road[Math.min(road.length-1,i+1)];
+     const length = Math.hypot(b.x-a.x,b.z-a.z) || 1;
+     return {x:p.x-(b.z-a.z)*.16/length,z:p.z+(b.x-a.x)*.16/length};
+   });
+   path(layer,congestionColors[level],shifted,.16,.085);
+ }
+ compile(layer);
+ if (software) collectFaces();
+ dirty = true;
+}
+function updateTraffic() {
+ const enabled = $('flow-enabled').checked && !overviewMode && !document.hidden;
+ $('flow-credit').hidden = !enabled;
+ const tile = enabled ? trafficTile(unproject(controls.target)) : null;
+ const key = tile?.key || '';
+ if (key !== trafficKey) {
+   trafficRequest?.abort(); trafficRequest = null;
+   trafficKey = key; trafficLines = []; drawTraffic();
+   nextTrafficRead = Date.now() + 700;
+   trafficStatus = key ? 'Looking up this tile…' : '';
+ }
+ const status = $('flow-status');
+ const message = !trafficToken ? 'Requires a Mapbox public token.' : !enabled ?
+   ($('flow-enabled').checked ? 'Zoom to streets for traffic.' : '') : trafficStatus;
+ if (status.textContent !== message) status.textContent = message;
+ if (!enabled || !trafficToken || trafficRequest || Date.now() < nextTrafficRead) return;
+ nextTrafficRead = Date.now() + refreshMs;
+ const request = new AbortController();
+ trafficRequest = request;
+ const timeout = setTimeout(() => request.abort(), 12000);
+ readTraffic(tile,trafficToken,request.signal).then(lines => {
+   if (trafficRequest !== request) return;
+   trafficLines = lines;
+   trafficStatus = lines.length ? 'Centre tile · fetched ' + new Date().toLocaleTimeString() :
+     'No reported surface traffic in this tile.';
+   drawTraffic();
+ }).catch(error => {
+   if (trafficRequest !== request) return;
+   trafficLines = []; drawTraffic();
+   trafficStatus = error.name === 'AbortError' ? 'Traffic request timed out.' : error.message;
+ }).finally(() => {
+   clearTimeout(timeout);
+   if (trafficRequest === request) trafficRequest = null;
+ });
+}
 function buildWorld(region,isOverview=false){clearWorld();if(region.id!=='free')current=region;overviewMode=isOverview;
  const land=group('land'),road=group('roads'),nature=group('nature'),build=group('buildings'),traffic=group('traffic');
+ group('flow');
  const polys=data.land.map(r=>r.slice(0,-1).map(fromGeo));
  const currentMesh=terrainMeshes?.overview;
  if(demActive&&currentMesh){
@@ -175,13 +233,20 @@ function buildWorld(region,isOverview=false){clearWorld();if(region.id!=='free')
  let n=0;for(const r of region.roads){if(r.points.length<2)continue;const pts=r.points.map(fromGeo);if(seeded(r.id)>.55)continue;const p=pts[Math.floor(pts.length/2)],a=pts[0],b=pts.at(-1),dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz)||1;const x=p.x-dz/len*1.3,z=p.z+dx/len*1.3;if(polys.some(poly=>inPolygon({x,z},poly))&&!buildingHits.some(b=>Math.abs(b.center.x-x)<1&&Math.abs(b.center.z-z)<1)){if(n%5===0)palm(nature,x,z,.9);else tree(nature,x,z,.7+(seeded(r.id+2)*.6),n);if(++n>180)break;}}
  for(const b of buildingHits.filter(b=>b.b.name).slice(0,8)){const icon=/bank/i.test(b.b.name)?'🏦':/mosq|church|temple/i.test(b.b.name)?'🏛':/market|shop|store/i.test(b.b.name)?'🛍':'📍';marker(b.b.name,icon,b.center,()=>showBuilding(b));}
  const selected=region.roads.filter(r=>['primary','secondary','tertiary','residential'].includes(r.kind)&&r.points.length>2).filter((r,i)=>i%7===0).slice(0,14);
- for(const [i,r]of selected.entries()){const g=new THREE.Group();traffic.add(g);box(g,['#f4d769','#e99576','#e9ebdb','#4c8e9b','#b8c9d2'][i%5],0,.11,0,.32,.25,.67);box(g,'#455e63',0,.35,.02,.27,.14,.32);box(g,'#354c47',-.18,.1,0,.07,.14,.5);box(g,'#354c47',.18,.1,0,.07,.14,.5);compile(g);const curve=new THREE.CurvePath();const pts=r.points.map(fromGeo);for(const p of pts)p.y=groundY(p)+.13;for(let j=1;j<pts.length;j++)curve.add(new THREE.LineCurve3(pts[j-1],pts[j]));cars.push({g,curve,offset:seeded(r.id),speed:.7/Math.max(curve.getLength(),1)});}
+ for(const [i,r]of selected.entries()){const g=new THREE.Group();traffic.add(g);const paint=['#efce67','#b95747','#e8e7dc','#367586','#94acb7'][i%5];
+ box(g,paint,0,.045,0,.18,.075,.44);
+ box(g,'#394f5b',0,.12,-.015,.155,.06,.22);
+ box(g,paint,0,.18,-.015,.14,.016,.14);
+ for(const x of [-.09,.09])for(const z of [-.135,.135])box(g,'#293133',x,.005,z,.025,.07,.075);
+ for(const x of [-.061,.061]){box(g,'#fff0c5',x,.08,.22,.037,.025,.006);box(g,'#b83c37',x,.08,-.22,.037,.025,.006);}
+ compile(g);const curve=new THREE.CurvePath();const pts=r.points.map(fromGeo);for(const p of pts)p.y=groundY(p)+.13;for(let j=1;j<pts.length;j++)curve.add(new THREE.LineCurve3(pts[j-1],pts[j]));cars.push({g,curve,lane:r.kind==='residential'?.15:.23,offset:seeded(r.id),speed:.7/Math.max(curve.getLength(),1)});}
  }else{
  for(const r of data.regions)marker(r.name,r.icon,fromGeo(r.center),()=>goRegion(r.id));
  // Overview uses DEM only. Named illustrative scenery loads in nearby detail views.
  }
  for(const g of [land,road,nature,build])compile(g);
  document.querySelectorAll('[data-layer]').forEach(input=>groups[input.dataset.layer].visible=input.checked);
+ if(trafficLines.length && !isOverview)drawTraffic();
  if(software)collectFaces();dirty=true;
 }
 // Geometry is imported only on approach; scene resources are discarded on departure.
@@ -361,6 +426,8 @@ function setupSearch(){
 }
 function setupInteraction(){
  setupSearch();
+ $('flow-enabled').disabled=!trafficToken.startsWith('pk.');
+ $('flow-enabled').onchange=updateTraffic;
  $('destinations').innerHTML=data.regions.map(r=>`<button class="destination" data-region="${r.id}"><span class="destination-icon">${r.icon}</span><span><strong>${r.name}</strong><small>${r.tag}</small></span></button>`).join('');document.querySelectorAll('.destination').forEach(b=>b.onclick=()=>goRegion(b.dataset.region));
  $('overview').onclick=()=>{streetRequest?.abort();roamingRegion=null;roamGeneration++;roamKey='';demActive=false;buildWorld(current,true);$('region-tag').textContent='ONE ISLAND. MANY LITTLE WORLDS.';$('region-name').innerHTML='Mauritius<span>.</span>';$('region-description').textContent='Point at any part of the island and scroll into its streets. This is the main island, shaped by OpenStreetMap.';$('world-status').textContent='The whole island';$('overview').classList.add('active');document.querySelectorAll('.destination').forEach(b=>b.classList.remove('active'));pose(fromGeo([57.565,-20.265]),true,true);void requestElevation();};
  $('reset').onclick=()=>roamingRegion?localFrame('close'):pose(overviewMode?fromGeo([57.565,-20.265]):cameraMode==='district'?fromGeo(current.center):closeFocus(current),overviewMode,true,overviewMode?'overview':cameraMode==='district'?'district':'close');
@@ -394,10 +461,10 @@ function tick(time){requestAnimationFrame(tick);if(document.hidden)return;const 
   controls.target.y+=dy;camera.position.y+=dy;if(Math.abs(dy)>.0001)dirty=true;
  }
  controls.update(delta);
- if(!animation&&time-lastCheck>160){lastCheck=time;trackDetail();updateScenery();}
+ if(!animation&&time-lastCheck>160){lastCheck=time;trackDetail();updateScenery();updateTraffic();}
  if(groups.scenery)groups.scenery.visible=groups.nature?.visible??true;
  if(software&&time-lastRender<50)return;
- if(groups.traffic?.visible&&!overviewMode){for(const car of cars){let t=(time*.001*car.speed+car.offset)%1;const p=car.curve.getPoint(t),tangent=car.curve.getTangent(t);car.g.position.copy(p);car.g.rotation.y=Math.atan2(tangent.x,tangent.z);}dirty=true;}
+ if(groups.traffic?.visible&&!overviewMode){for(const car of cars){let t=(time*.001*car.speed+car.offset)%1;const p=car.curve.getPoint(t),tangent=car.curve.getTangent(t);car.g.position.set(p.x+tangent.z*car.lane,0,p.z-tangent.x*car.lane);car.g.position.y=groundY(car.g.position)+.056;car.g.rotation.y=Math.atan2(tangent.x,tangent.z);}dirty=true;}
  animateScenery(time);
  if(dirty||controls.autoRotate){if(software)softwareRender();else renderer.render(scene,camera);updateLabels();dirty=false;}lastRender=time;
 }
@@ -418,7 +485,7 @@ async function init(){try{
  });
  document.addEventListener('keyup',e=>held.delete(e.key.toLowerCase()));
  window.addEventListener('blur',()=>held.clear());
- document.addEventListener('visibilitychange',()=>held.clear());
+ document.addEventListener('visibilitychange',()=>{held.clear();updateTraffic();});
  scene.add(new THREE.HemisphereLight('#fffbe6','#7d8f6a',1.9));sun=new THREE.DirectionalLight('#fff7d7',2.0);sun.position.set(-100,250,140);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-280;sun.shadow.camera.right=280;sun.shadow.camera.top=280;sun.shadow.camera.bottom=-280;sun.shadow.camera.near=1;sun.shadow.camera.far=1700;sun.shadow.bias=-.0003;scene.add(sun);scene.add(sun.target);loadTextures();
  const response=await fetch(assets+'mauritius-osm.json');if(!response.ok)throw new Error('The OpenStreetMap dataset could not be loaded. Please reload.');data=await response.json();
  try{const terrainResponse=await fetch(assets+'terrain-mesh.json');terrainMeshes=terrainResponse.ok?await terrainResponse.json():null;}catch(error){terrainMeshes=null;}
@@ -427,4 +494,4 @@ async function init(){try{
 init();
 
 // Supported smoke-test state, separate from geographic accuracy claims.
-window.__MU_TEST__=()=>({sceneryVisible:groups.scenery?.visible??false,scenery:groups.scenery?.userData.sites??[],sceneryMeshes:groups.scenery?.children.length??0,region:current?.id||null,overview:overviewMode,view:view(),target:controls?.target.toArray(),roamKey,cachedTiles:tileStore.cache.size,dem:demActive,theme:themeId,cameraMode,span,zoom:camera.zoom,focus:current?focusCache.get(current.id):null,buildingHits:buildingHits.length,roads:overviewMode?data.mainRoads.length:(roamingRegion??current)?.roads.length||0,software});
+window.__MU_TEST__=()=>({trafficKey,trafficLines:trafficLines.length,trafficMeshes:groups.flow?.children.length??0,trafficVertices:groups.flow?.children.reduce((n,m)=>n+m.geometry.attributes.position.count,0)??0,sceneryVisible:groups.scenery?.visible??false,scenery:groups.scenery?.userData.sites??[],sceneryMeshes:groups.scenery?.children.length??0,region:current?.id||null,overview:overviewMode,view:view(),target:controls?.target.toArray(),roamKey,cachedTiles:tileStore.cache.size,dem:demActive,theme:themeId,cameraMode,span,zoom:camera.zoom,focus:current?focusCache.get(current.id):null,buildingHits:buildingHits.length,roads:overviewMode?data.mainRoads.length:(roamingRegion??current)?.roads.length||0,software});
