@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import {createContext,runInContext} from 'node:vm';
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {createStreetLayout,roadStyle} from '../src/explorer/street-layout.js';
 
 const source=readFileSync(new URL('../src/explorer/app.js',import.meta.url),'utf8');
 function production(start,end){
@@ -15,7 +16,7 @@ const emptyRegion={id:'port-louis',roads:[],buildings:[],parks:[]};
 function streaming(){
  const reads=[],builds=[],root=new THREE.Group(),nodes=new Map();
  let keys=['A','B','C'],height=40,load=async ks=>ks.map(()=>({roads:[],buildings:[]}));
- const scope=createContext({THREE,AbortController,Set,performance,root,markers:[],cars:[],buildingHits:[],cpuFaces:[],
+ const scope=createContext({THREE,createStreetLayout,roadStyle,AbortController,Set,performance,root,markers:[],cars:[],buildingHits:[],cpuFaces:[],
   groups:{},selectedBuilding:null,renderedStreet:null,sceneryKey:'',current:emptyRegion,overviewMode:false,
   roamingRegion:null,streetRequest:null,roamKey:'',roamGeneration:0,demActive:false,demToken:0,surface:null,
   tileIndex:new Set(keys),terrainMeshes:null,roadTapVersion:0,roadPickPaths:[],selectedRoad:null,trafficLines:[],
@@ -115,6 +116,7 @@ test('tick refreshes camera matrices before every screen-space consumer without 
   assert.ok(actual.distanceTo(expected)*1440<1e-6,name+' uses current matrices');observed.push(name);
  };
  const scope=createContext({camera,controls,requestAnimationFrame(){},document:{hidden:false},previousFrame:0,
+  motionTime:0,reducedMotion:{matches:false},followSun(){},animateCars(){},
   animation:null,desiredView:null,held:new Set(),groundY:()=>0,dirty:true,lastCheck:Infinity,
   groups:{},scene:new THREE.Scene(),software:false,overviewMode:false,lastRender:0,demActive:false,surface:null,view:()=>40,
   updateRoadHover:()=>check('hover'),updateRoadLocator:()=>check('locator'),

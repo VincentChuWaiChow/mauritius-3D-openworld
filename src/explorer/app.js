@@ -1,4 +1,6 @@
 import {mountWeather} from './weather.js';
+import {surfaceTextures} from './surface-textures.js';
+import {createStreetLayout,roadStyle} from './street-layout.js';
 import {sceneryPlacement,scenerySkirt} from './scenery-placement.js';
 import {withLandmarks,nearbyLandmarks,sceneryVegetationArea} from './landmarks.js';
 import {searchPlaces,panelAlpha} from './search.js';
@@ -23,7 +25,8 @@ let terrainMeshes=null,demActive=false,demToken=0,themeId='little',sun;
 let cameraMode='close', selectedBuilding=null;
 // Orthographic scale is measured in world units across the viewport height.
 const MIN_VIEW=3, MAX_VIEW=15500, held=new Set();
-let desiredView=null, anchor=null, previousFrame=0, roamKey='', roamGeneration=0, lastCheck=0;
+let desiredView=null, anchor=null, previousFrame=null, motionTime=0, lastCarTime=-Infinity, roamKey='', roamGeneration=0, lastCheck=0;
+const reducedMotion=matchMedia('(prefers-reduced-motion: reduce)');
 const view=()=>span/camera.zoom;
 function setView(h){
  camera.zoom=span/THREE.MathUtils.clamp(h,MIN_VIEW,MAX_VIEW);
@@ -33,12 +36,13 @@ function queueZoom(factor,point=null){
  roadTapVersion++;animation=null; anchor=point; desiredView=THREE.MathUtils.clamp((desiredView??view())*factor,MIN_VIEW,MAX_VIEW);
 }
 const focusCache=new Map();
-const elevation=new TerrainCache(), textures=new Map();
+const elevation=new TerrainCache(), textures=surfaceTextures(assets,()=>{dirty=true;},failedTexture);
 let groups={},markers=[],buildingHits=[],cars=[],cpuFaces=[],animation=null,renderedStreet=null;
 const colors={...THEMES.little};
 const fromGeo=point=>{const p=project(point);return new THREE.Vector3(p.x,0,p.z)};
 const vector=(x,y,z)=>new THREE.Vector3(x,y,z);
 const root=new THREE.Group();scene.add(root);
+const carPoint=new THREE.Vector3(),carTangent=new THREE.Vector3(),sunShift=new THREE.Vector3();
 const raycaster=new THREE.Raycaster(),pointer=new THREE.Vector2();
 function seeded(n){let x=Math.sin(n*127.1+311.7)*43758.5453;return x-Math.floor(x)}
 function bucket(group,color){group.userData.buckets??=new Map();if(!group.userData.buckets.has(color))group.userData.buckets.set(color,[]);return group.userData.buckets.get(color)}
@@ -48,14 +52,14 @@ function box(g,c,x,y,z,w,h,d){let x0=x-w/2,x1=x+w/2,z0=z-d/2,z1=z+d/2,y1=y+h;qua
 function cone(g,c,x,y,z,r,h,sides=6){for(let i=0;i<sides;i++){let a=i/sides*Math.PI*2,b=(i+1)/sides*Math.PI*2;tri(g,c,[x+Math.cos(a)*r,y,z+Math.sin(a)*r],[x,y+h,z],[x+Math.cos(b)*r,y,z+Math.sin(b)*r]);}}
 function polygon(g,c,pts,y){if(pts.length<3)return;const contour=pts.map(p=>new THREE.Vector2(p.x,p.z));const indices=THREE.ShapeUtils.triangulateShape(contour,[]);const offset=v=>g.name==='buildings'?0:groundY(v);for(const [a,b,d] of indices)tri(g,c,[pts[a].x,offset(pts[a])+y,pts[a].z],[pts[d].x,offset(pts[d])+y,pts[d].z],[pts[b].x,offset(pts[b])+y,pts[b].z]);}
 function groundY(point){return demActive&&surface?surface.sceneHeight(point):0;}
-function path(g,c,pts,width,y){
+function path(g,c,pts,width,y,outerWidth=width){
  const samples=[];
  for(let i=0;i<pts.length;i++){
    const b=pts[i],a=pts[i-1]??b, dx=b.x-a.x,dz=b.z-a.z;
    const n=demActive?Math.min(60,Math.max(1,Math.ceil(Math.hypot(dx,dz)/6))):1;
    for(let j=1;j<=n;j++){
      const x=a.x+dx*j/n,z=a.z+dz*j/n;
-     samples.push({x,z,y:groundY({x,z})+y});
+     samples.push({x,z,y:groundY({x,z})+y,maxReach:Math.min(a.maxReach??Infinity,b.maxReach??Infinity)*width/outerWidth});
    }
  }
  ribbon(samples,width,(a,b,d,e)=>{
@@ -95,16 +99,14 @@ function compile(g){for(const [color,positions]of g.userData.buckets||[]){
  const mesh=new THREE.Mesh(geo,materialFor(g,color));mesh.userData.color=color;
  mesh.castShadow=g.name==='buildings';mesh.receiveShadow=g.name==='buildings'||g.name==='land';g.add(mesh);
  }delete g.userData.buckets;}
-function textureFor(name){
- if(textures.has(name))return textures.get(name);
- const tex=new THREE.TextureLoader().load(assets+'textures/'+name+'.png',()=>{dirty=true;},undefined,()=>{dirty=true;});
- tex.colorSpace=THREE.SRGBColorSpace;tex.wrapS=tex.wrapT=THREE.RepeatWrapping;
- tex.anisotropy=4;textures.set(name,tex);return tex;
+function failedTexture(texture){
+ root.traverse(({material})=>{if(material?.map===texture){material.map=null;material.needsUpdate=true;}});
 }
+function textureFor(name){return textures(name);}
 function group(name){const g=new THREE.Group();g.name=name;root.add(g);groups[name]=g;return g;}
 function tree(g,x,z,size=1,seed=0){if(sceneryVegetationArea({x,z}))return;const floor=groundY({x,z});box(g,'#887b51',x,floor+.1,z,.2*size,1.1*size,.2*size);cone(g,['#3f8356','#548e56','#609a5b','#408c65'][seed%4],x,floor+.75*size,z,.85*size,1.5*size,5);cone(g,'#76a966',x,floor+1.5*size,z,.6*size,1.1*size,5);}
 function palm(g,x,z,size=1){if(sceneryVegetationArea({x,z}))return;const floor=groundY({x,z});box(g,'#a48a61',x,floor+.1,z,.15*size,1.7*size,.15*size);for(let i=0;i<6;i++){const a=i*Math.PI/3;const dx=Math.cos(a),dz=Math.sin(a);tri(g,i%2?'#4b9577':'#378367',[x,floor+1.9*size,z],[x+dx*1.2*size-dz*.22*size,floor+1.5*size,z+dz*1.2*size+dx*.22*size],[x+dx*1.5*size,floor+1.3*size,z+dz*1.5*size]);}}
-function clearWorld(){renderedStreet=null;sceneryKey='';markers.forEach(m=>m.el.remove());markers=[];cars=[];buildingHits=[];selectedBuilding=null;cpuFaces=[];root.traverse(o=>{o.geometry?.dispose();if(o.material)o.material.dispose()});root.clear();groups={};$('detail').hidden=true;}
+function clearWorld(){renderedStreet=null;lastCarTime=-Infinity;sceneryKey='';markers.forEach(m=>m.el.remove());markers=[];cars=[];buildingHits=[];selectedBuilding=null;cpuFaces=[];root.traverse(o=>{o.geometry?.dispose();if(o.material)o.material.dispose()});root.clear();groups={};$('detail').hidden=true;}
 function inPolygon(p,poly){let inside=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if(((a.z>p.z)!==(b.z>p.z))&&(p.x<(b.x-a.x)*(p.z-a.z)/(b.z-a.z)+a.x))inside=!inside;}return inside;}
 function heightMeters(value){
  if(value==null)return NaN;
@@ -310,8 +312,14 @@ function buildWorld(region,isOverview=false){clearWorld();if(region.id!=='free')
    mesh.receiveShadow=true;mesh.userData.color=colors.land;land.add(mesh);
  }else for(const p of polys)polygon(land,colors.land,p,0);
  for(const p of polys)path(land,colors.shore,[...p,p[0]],isOverview?7:1.2,.035);
- const roads=isOverview?data.mainRoads:region.roads;
- for(const r of roads){const pts=r.points.map(fromGeo);const width=({motorway:1.6,trunk:1.35,primary:1.2,secondary:1,tertiary:.85,residential:.65,service:.45,pedestrian:.5})[r.kind]||.6;path(road,colors.sidewalk,pts,isOverview?Math.max(width,6):width+.35,.045);path(road,colors.roads,pts,isOverview?Math.max(width*.8,4):width,.055);if(!isOverview&&['motorway','trunk','primary','secondary'].includes(r.kind))path(road,'#d6d7bd',pts,.04,.065);}
+ const projectedRoads=(isOverview?data.mainRoads:region.roads).map(r=>({...r,points:r.points.map(fromGeo)}));
+ const streetLayout=isOverview?null:createStreetLayout(region.buildings.map(b=>b.points.slice(0,-1).map(fromGeo)),projectedRoads);
+ for(const r of streetLayout?.roads??projectedRoads){
+  const {width,casing}=r.style??roadStyle(r.kind),pts=r.points;
+  path(road,colors.sidewalk,pts,isOverview?Math.max(width,6):casing,.045,casing);
+  path(road,colors.roads,pts,isOverview?Math.max(width*.8,4):width,.055,casing);
+  if(!isOverview&&['motorway','trunk','primary','secondary'].includes(r.kind))path(road,'#d6d7bd',pts,.04,.065,casing);
+ }
  if(!isOverview){
  for(const p of region.parks)polygon(nature,colors.park,p.slice(0,-1).map(fromGeo),.075);
  for(const b of region.buildings){
@@ -345,7 +353,17 @@ function buildWorld(region,isOverview=false){clearWorld();if(region.id!=='free')
   buildingHits.push({b,points:p,center:vector(center.x,ground+h,center.z),height:h,ground,known});
  }
  // Ornamental roadside trees: deliberately not presented as mapped tree locations.
- let n=0;for(const r of region.roads){if(r.points.length<2)continue;const pts=r.points.map(fromGeo);if(seeded(r.id)>.55)continue;const p=pts[Math.floor(pts.length/2)],a=pts[0],b=pts.at(-1),dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz)||1;const x=p.x-dz/len*1.3,z=p.z+dx/len*1.3;if(polys.some(poly=>inPolygon({x,z},poly))&&!buildingHits.some(b=>Math.abs(b.center.x-x)<1&&Math.abs(b.center.z-z)<1)){if(n%5===0)palm(nature,x,z,.9);else tree(nature,x,z,.7+(seeded(r.id+2)*.6),n);if(++n>180)break;}}
+ let n=0;for(const r of region.roads){
+  if(r.points.length<2||seeded(r.id)>.55)continue;
+  const pts=r.points.map(fromGeo),p=pts[Math.floor(pts.length/2)],a=pts[0],b=pts.at(-1);
+  const palmTree=seeded(r.id+1)<.2,size=palmTree?.9:.7+seeded(r.id+2)*.6,radius=(palmTree?1.5:.85)*size;
+  const setback=radius+roadStyle(r.kind).casing*.5+.2;
+  const dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz)||1,x=p.x-dz/len*setback,z=p.z+dx/len*setback;
+  if(polys.some(poly=>inPolygon({x,z},poly))&&streetLayout.canPlant({x,z},radius)){
+   if(palmTree)palm(nature,x,z,size);else tree(nature,x,z,size,n);
+   if(++n>=180)break;
+  }
+ }
  for(const b of buildingHits.filter(b=>b.b.name).slice(0,8)){const icon=/bank/i.test(b.b.name)?'🏦':/mosq|church|temple/i.test(b.b.name)?'🏛':/market|shop|store/i.test(b.b.name)?'🛍':'📍';marker(b.b.name,icon,b.center,()=>showBuilding(b));}
  const selected=region.roads.filter(r=>['primary','secondary','tertiary','residential'].includes(r.kind)&&r.points.length>2).filter((r,i)=>i%7===0).slice(0,14);
  for(const [i,r]of selected.entries()){const g=new THREE.Group();traffic.add(g);const paint=['#efce67','#b95747','#e8e7dc','#367586','#94acb7'][i%5];
@@ -373,7 +391,7 @@ function updateScenery(){
  // Street tiles may fall back to the overview mesh before a large landmark
  // leaves the view. Keep scenery independent of that street-data fallback.
  const sites=nearbyLandmarks(controls.target,view(),overviewMode&&view()>450);
- const key=sites.map(s=>s.id).join(',')+':'+demActive;
+ const key=sites.map(s=>s.id).join(',')+':'+demActive+':'+reducedMotion.matches;
  if(!sites.length&&!groups.scenery)return;
  if(sites.length&&!sceneryModule){
   sceneryLoading??=import('./scenery.js').then(m=>{sceneryModule=m;sceneryKey='';}).catch(()=>{sceneryLoading=null;});
@@ -393,7 +411,7 @@ function updateScenery(){
   }
   compile(g);
   // Static water remains available in software and reduced-motion views.
-  if(!software&&!matchMedia('(prefers-reduced-motion: reduce)').matches){
+  if(!software&&!reducedMotion.matches){
    for(const site of sites.filter(s=>s.scenery==='waterfall')){
     const flow=new THREE.Group();flow.name='water-flow';flow.userData.origin=fromGeo(site.center);
     for(const f of sceneryModule.waterTriangles(0))tri(flow,f.color,f.a,f.b,f.c);
@@ -404,7 +422,7 @@ function updateScenery(){
  if(software)collectFaces();dirty=true;
 }
 function animateScenery(time){
- if(software||!groups.scenery?.visible)return;
+ if(software||reducedMotion.matches||!groups.scenery?.visible)return;
  for(const flow of groups.scenery.children.filter(g=>g.name==='water-flow')){
   const batches=new Map();
   for(const f of sceneryModule.waterTriangles(time*.001)){
@@ -653,7 +671,27 @@ function setupInteraction(){
 
  window.addEventListener('resize',resize);document.addEventListener('keydown',e=>{if(e.key==='Escape'){clearRoadSelection();$('detail').hidden=true;$('layers-panel').hidden=true;controls.autoRotate=false;}if(e.key.toLowerCase()==='r'&&!$('about').open&&!e.target.closest?.('input,textarea,select,[contenteditable=true]'))$('reset').click();});
 }
-function tick(time){requestAnimationFrame(tick);if(document.hidden)return;const delta=Math.min((time-previousFrame)/1000,.08);previousFrame=time;if(animation){const t=Math.min((time-animation.start)/750,1),ease=1-(1-t)**3;setView(animation.initial*(animation.end/animation.initial)**ease);camera.position.lerpVectors(animation.from,animation.to,ease);controls.target.lerpVectors(animation.fromTarget,animation.toTarget,ease);if(t===1)animation=null;dirty=true;}
+function animateCars(time){
+ if(!groups.traffic?.visible||overviewMode||time===lastCarTime)return;
+ lastCarTime=time;
+ for(const car of cars){
+  const t=(time*.001*car.speed+car.offset)%1;
+  const p=car.curve.getPoint(t,carPoint),tangent=car.curve.getTangent(t,carTangent);
+  car.g.position.set(p.x+tangent.z*car.lane,0,p.z-tangent.x*car.lane);
+  car.g.position.y=groundY(car.g.position)+.056;car.g.rotation.y=Math.atan2(tangent.x,tangent.z);
+ }
+ if(cars.length)dirty=true;
+}
+function followSun(){
+ if(!sun)return;
+ const shadow=sun.shadow.camera;
+ const far=Math.max(1700,sun.position.distanceTo(sun.target.position)+Math.max(Math.abs(shadow.left),Math.abs(shadow.right),Math.abs(shadow.top),Math.abs(shadow.bottom)));
+ if(shadow.far!==far){shadow.far=far;shadow.updateProjectionMatrix();dirty=true;}
+ sunShift.copy(controls.target).sub(sun.target.position);
+ if(sunShift.lengthSq()===0)return;
+ sun.position.add(sunShift);sun.target.position.copy(controls.target);dirty=true;
+}
+function tick(time){requestAnimationFrame(tick);if(document.hidden){previousFrame=null;return;}const delta=previousFrame===null?0:Math.min(Math.max((time-previousFrame)/1000,0),.08);previousFrame=time;if(!reducedMotion.matches)motionTime+=delta*1000;if(animation){const t=Math.min((time-animation.start)/750,1),ease=1-(1-t)**3;setView(animation.initial*(animation.end/animation.initial)**ease);camera.position.lerpVectors(animation.from,animation.to,ease);controls.target.lerpVectors(animation.fromTarget,animation.toTarget,ease);if(t===1)animation=null;dirty=true;}
  if(desiredView!==null){
    const before=view(),next=desiredView*(before/desiredView)**Math.exp(-15*delta);
    const done=Math.abs(Math.log(next/desiredView))<.0003;setView(done?desiredView:next);
@@ -670,14 +708,14 @@ function tick(time){requestAnimationFrame(tick);if(document.hidden)return;const 
   controls.target.y+=dy;camera.position.y+=dy;if(Math.abs(dy)>.0001)dirty=true;
  }
  controls.update(delta);
+ followSun();
  // Screen-space consumers run before renderer.render refreshes camera matrices.
  camera.updateMatrixWorld();updateRoadHover(time);
  if(dirty||controls.autoRotate)updateRoadLocator();
  if(!animation&&time-lastCheck>160){lastCheck=time;trackDetail();updateScenery();updateTraffic();}
  if(groups.scenery)groups.scenery.visible=groups.nature?.visible??true;
  if(software&&time-lastRender<50)return;
- if(groups.traffic?.visible&&!overviewMode){for(const car of cars){let t=(time*.001*car.speed+car.offset)%1;const p=car.curve.getPoint(t),tangent=car.curve.getTangent(t);car.g.position.set(p.x+tangent.z*car.lane,0,p.z-tangent.x*car.lane);car.g.position.y=groundY(car.g.position)+.056;car.g.rotation.y=Math.atan2(tangent.x,tangent.z);}dirty=true;}
- animateScenery(time);
+ animateCars(motionTime);animateScenery(motionTime);
  drawWeather?.({time,camera,target:controls.target,wide:view()>450,ground:groundY,terrain:demActive?surface:null});
  if(dirty||controls.autoRotate){if(software)softwareRender();else renderer.render(scene,camera);updateLabels();dirty=false;}lastRender=time;
 }
@@ -698,7 +736,7 @@ async function init(){try{
  });
  document.addEventListener('keyup',e=>held.delete(e.key.toLowerCase()));
  window.addEventListener('blur',()=>held.clear());
- document.addEventListener('visibilitychange',()=>{held.clear();clearRoadHover();updateTraffic();});
+ document.addEventListener('visibilitychange',()=>{previousFrame=null;held.clear();clearRoadHover();updateTraffic();});
  scene.add(new THREE.HemisphereLight('#fffbe6','#7d8f6a',1.9));sun=new THREE.DirectionalLight('#fff7d7',2.0);sun.position.set(-100,250,140);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);sun.shadow.camera.left=-280;sun.shadow.camera.right=280;sun.shadow.camera.top=280;sun.shadow.camera.bottom=-280;sun.shadow.camera.near=1;sun.shadow.camera.far=1700;sun.shadow.bias=-.0003;scene.add(sun);scene.add(sun.target);
  const response=await fetch(assets+'mauritius-osm.json');if(!response.ok)throw new Error('The OpenStreetMap dataset could not be loaded. Please reload.');data=await response.json();
  try{const terrainResponse=await fetch(assets+'terrain-mesh.json');terrainMeshes=terrainResponse.ok?await terrainResponse.json():null;}catch(error){terrainMeshes=null;}

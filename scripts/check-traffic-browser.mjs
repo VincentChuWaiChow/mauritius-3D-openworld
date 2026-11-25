@@ -190,7 +190,8 @@ try {
     const previousKey = await ev('__MU_TEST__().trafficKey');
     await ev("document.querySelector('[data-region=grand-baie]').click()");
     await waitFor(`__MU_TEST__().trafficKey !== ${JSON.stringify(previousKey)} && __MU_TEST__().trafficLines === 1`, 'new centre tile');
-    await ev("document.getElementById('overview').click()"); await sleep(1200);
+    await ev("document.getElementById('overview').click()");
+    await waitFor("__MU_TEST__().overview && __MU_TEST__().trafficMeshes === 0 && document.getElementById('flow-credit').hidden", 'overview traffic cleanup');
     assert.equal(await ev('__MU_TEST__().trafficMeshes'), 0);
     assert.equal(await ev("document.getElementById('flow-credit').hidden"), true);
     const overviewCalls = (await mock()).calls;

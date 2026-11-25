@@ -20,3 +20,11 @@ test('software pavement always covers its casing and sits below its markings',()
   assert.ok(roadPass(palette.sidewalk,palette)<roadPass(palette.roads,palette));
   assert.ok(roadPass(palette.roads,palette)<roadPass('#fff',palette));
 });
+
+test('ribbon miter reach respects building-clearance caps at both segment ends',()=>{
+ const points=[{x:0,y:0,z:0,maxReach:.15},{x:3,y:0,z:0,maxReach:.1},{x:3,y:0,z:3,maxReach:0}];
+ const faces=[];ribbon(points,2,(...q)=>faces.push(q));
+ for(let i=0;i<faces.length;i++)for(const [v,p] of [[faces[i][0],points[i]],[faces[i][1],points[i]],[faces[i][2],points[i+1]],[faces[i][3],points[i+1]]]){
+  assert.ok(Math.hypot(v[0]-p.x,v[2]-p.z)<=p.maxReach+1e-10);
+ }
+});

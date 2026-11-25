@@ -64,6 +64,19 @@ Camera matrices refresh before screen-space overlays. Weather follows view chang
 on the next rendered frame while stationary animation retains its 80 ms cadence;
 reduced motion freezes the particles, not their map alignment.
 
+Decorative cars and waterfall highlights use a capped foreground clock, so hidden
+tabs do not make them jump ahead. Live reduced-motion changes pause their movement.
+The directional shadow rig follows the exploration focus and fits its depth range
+without enlarging its shadow texture. Failed surface textures fall back to the
+existing material colors and retry on the next scene rebuild; successful textures
+remain shared.
+
+Decorative trees require clearance for their entire canopy from loaded building
+footprints and road casings, not just their trunks. Illustrated street widths fit
+around those footprints; paths and cycleways no longer use car-road widths. The
+OSM coordinates are unchanged. Bundled roads lack bridge/tunnel/layer metadata, so
+this ground-surface layout does not establish which real crossings are elevated.
+
 ## Classic explorer
 
 The previous map remains available at [classic.html](./classic.html). The controls and implementation notes below describe that version.
