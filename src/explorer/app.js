@@ -1,3 +1,4 @@
+import {mountWeather} from './weather.js';
 import {sceneryPlacement,scenerySkirt} from './scenery-placement.js';
 import {withLandmarks,nearbyLandmarks,sceneryVegetationArea} from './landmarks.js';
 import {searchPlaces,panelAlpha} from './search.js';
@@ -580,7 +581,9 @@ function setupSearch(){
  slider.oninput=transparency;transparency();
 }
 
+let drawWeather;
 function setupInteraction(){
+ drawWeather=mountWeather({toggle:$('weather-enabled'),status:$('weather-status'),canvas:$('weather-effects')});
  setupSearch();
  $('flow-enabled').disabled=!trafficToken.startsWith('pk.');
  $('flow-enabled').onchange=updateTraffic;
@@ -640,6 +643,7 @@ function tick(time){requestAnimationFrame(tick);if(document.hidden)return;const 
  if(software&&time-lastRender<50)return;
  if(groups.traffic?.visible&&!overviewMode){for(const car of cars){let t=(time*.001*car.speed+car.offset)%1;const p=car.curve.getPoint(t),tangent=car.curve.getTangent(t);car.g.position.set(p.x+tangent.z*car.lane,0,p.z-tangent.x*car.lane);car.g.position.y=groundY(car.g.position)+.056;car.g.rotation.y=Math.atan2(tangent.x,tangent.z);}dirty=true;}
  animateScenery(time);
+ drawWeather?.({time,camera,target:controls.target,wide:view()>450,ground:groundY});
  if(dirty||controls.autoRotate){if(software)softwareRender();else renderer.render(scene,camera);updateLabels();dirty=false;}lastRender=time;
 }
 async function init(){try{

@@ -117,3 +117,6 @@ header,footer,.region-card,.right-tools,#layers-panel,#detail,.credits,.place-se
  #road-selection{padding:14px}
  #road-selection-name{font-size:19px}
 }
+
+#weather-effects {position:fixed;inset:0;width:100%;height:100%;pointer-events:none;z-index:1}
+#weather-status:not(:empty) {display:block;font-variant-numeric:tabular-nums}

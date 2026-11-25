@@ -226,3 +226,17 @@ Open **Layers & Style → Mapbox traffic · centre tile** in street view. The ov
 Validate coverage with a real token in Port Louis, at Phoenix and on a quieter road. Record non-empty directional features, tile coordinates and fetch times in peak and off-peak periods before advertising local coverage. Inspect opposing carriageways and grade-separated junctions; the overlay uses ground-level ribbons, omits tunnels and does not reconstruct bridge-deck heights.
 
 Offline browser regression: start Vite with `VITE_MAPBOX_PUBLIC_TOKEN=pk.fixture npm run dev`, then run `APP_URL=<local Vite URL> CHROME_DEBUG_URL=<local Chrome debugger URL> node scripts/check-traffic-browser.mjs`. The checker mocks provider responses and blocks external fetches. Run again against Vite without a token with `EXPECT_TRAFFIC_TOKEN=0` to check the disabled state. This does not verify live coverage or native GPU performance.
+
+### Regional weather simulation
+
+Open **Layers & Style → Regional weather simulation**. The explorer fetches seven
+main-island locations from the [Open-Meteo Forecast API](https://open-meteo.com/en/docs)
+on demand, then refreshes every 15 minutes while enabled and visible. Overview
+effects are projected onto the map at each sample. Street views use the nearest
+available sample. Clouds and wind-driven rain are artistic. The status gives the
+model time in Mauritius and the precipitation accumulation interval. Samples older
+than one hour expire. The software renderer also supports the overlay.
+
+No API key is required for the public non-commercial endpoint. Review
+[usage limits and commercial licensing](https://open-meteo.com/en/pricing) before
+deployment. Weather data © Open-Meteo, CC BY 4.0, visualized with simulated effects.
