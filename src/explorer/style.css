@@ -173,7 +173,7 @@ header,footer,.region-card,.right-tools,#layers-panel,#detail,.credits,.place-se
 .right-tools:has(#layers-panel:not([hidden])){z-index:9}
 .layers{top:calc(100% + 12px);right:0;width:max-content}
 #layers-button{min-height:44px}
-#layers-panel{position:fixed;top:110px;right:30px;bottom:24px;margin:0;width:min(480px,calc(100vw - 30px));max-height:none;overscroll-behavior:contain}
+#layers-panel{position:fixed;top:110px;right:30px;bottom:auto;margin:0;width:min(480px,calc(100vw - 30px));max-height:calc(100dvh - 134px);overscroll-behavior:contain}
 .layers-panel-heading{position:sticky;top:-16px;display:flex;align-items:center;justify-content:space-between;gap:12px;margin:-16px -16px 12px;padding:4px 8px 4px 16px;background:var(--cream);border-bottom:1px solid #d7e3d9;z-index:1}
 .layers-panel-heading strong{font:600 18px 'Outfit',sans-serif}
 #close-layers{width:44px;height:44px;display:grid;place-items:center;background:#e7f1e7;border-radius:9px;flex:none}
@@ -190,12 +190,12 @@ footer{bottom:64px}
  #layers-button span{display:none}
  #layers-button::after{content:"Style";font-size:11px}
 }
-@media(max-height:650px) and (min-width:601px){#layers-panel{top:80px}}
+@media(max-height:650px) and (min-width:601px){#layers-panel{top:80px;max-height:calc(100dvh - 104px)}}
 @media(max-width:600px){
  .right-tools{top:100px;right:15px}
  .explore-rail{width:min(300px,calc(100% - 134px));max-height:calc(100dvh - 320px)}
  .explore-rail .place-search label{font-size:18px}
- #layers-panel{top:90px;right:15px;bottom:16px}
+ #layers-panel{top:90px;right:15px;max-height:calc(100dvh - 106px)}
  footer{bottom:82px}
  .credits #renderer-status,.credits #renderer-status+b,.credits>button+b{display:none}
 }

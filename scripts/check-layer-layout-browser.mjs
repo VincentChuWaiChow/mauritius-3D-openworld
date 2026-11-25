@@ -41,11 +41,15 @@ try{
   await ev("document.querySelector('#layers-button').click()");
   assert.equal(await ev("document.querySelector('#layers-button').getAttribute('aria-expanded')"),'true');
   await mkdir(output,{recursive:true});
-  for(const [width,height] of [[1440,900],[768,1024],[600,900],[480,800],[420,812],[375,812],[320,640],[960,540]]){
+  for(const [width,height] of [[1440,900],[768,1024],[600,900],[480,800],[420,812],[375,812],[320,640],[960,540],[1920,1080]]){
     await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
     // A software-renderer resize can arrive after the emulation command. Check
     // settled geometry, rather than treating its previous canvas size as overflow.
     await wait('Math.abs(document.querySelector("#world canvas").getBoundingClientRect().width-innerWidth)<1');
+    if(width===1920){
+      await ev("document.querySelector('#overview').click()");
+      await wait('window.__MU_TEST__().overview');
+    }
     await ev("document.querySelector('#close-layers').click()");
     assert.equal(await ev("document.activeElement.id"),'layers-button','Close restores disclosure focus');
     const closed=await ev(`(()=>{
@@ -77,7 +81,8 @@ try{
       const rect=e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom,right:r.right}};
       const tiles=[...grid.children].map(el=>({...rect(el),fontSize:parseFloat(getComputedStyle(el).fontSize),overflow:el.scrollWidth>el.clientWidth}));
       const b=rect(p);
-      return {width:innerWidth,height:innerHeight,panel:b,scrollHeight:p.scrollHeight,grid:rect(grid),tiles,
+      const requiredHeight=p.lastElementChild.getBoundingClientRect().bottom-b.y+parseFloat(getComputedStyle(p).paddingBottom);
+      return {width:innerWidth,height:innerHeight,overview:window.__MU_TEST__().overview,panel:b,requiredHeight,scrollHeight:p.scrollHeight,grid:rect(grid),tiles,
         overflow:p.scrollWidth>p.clientWidth||document.documentElement.scrollWidth>innerWidth,
         columns:getComputedStyle(grid).gridTemplateColumns,metadataFont:parseFloat(getComputedStyle(p.querySelector('.layer-details')).fontSize),
         checkboxes:p.querySelectorAll('input[type=checkbox]').length};
@@ -88,6 +93,7 @@ try{
     assert.equal(new Set(layout.tiles.map(t=>Math.round(t.y))).size,Math.ceil(8/columns));
     assert.equal(layout.overflow,false,'panel/page horizontal overflow');
     assert.ok(layout.panel.x>=0&&layout.panel.right<=width+1&&layout.panel.y>=0&&layout.panel.bottom<=height+1,JSON.stringify(layout.panel));
+    assert.ok(layout.panel.height<=Math.ceil(layout.requiredHeight)+1,'Panel must hug its content instead of stretching to the viewport: '+JSON.stringify({width,height,actual:layout.panel.height,required:layout.requiredHeight}));
     for(const tile of layout.tiles){assert.ok(tile.height>=44);assert.ok(tile.fontSize>=12);assert.equal(tile.overflow,false);}
     assert.ok(layout.metadataFont>=12);
     assert.ok(Math.abs(layout.tiles[0].width-layout.tiles[1].width)<1);
@@ -140,7 +146,7 @@ try{
   assert.equal(await ev("document.activeElement.id"),'place-query','Closed settings must not steal search focus');
   assert.deepEqual(errors,[]);
   await writeFile(`${output}/measurements.json`,JSON.stringify(reports,null,2));
-  console.log('Layer tiles browser PASS: eight viewports, adaptive three/two columns, 44px targets, containment, scrolling, long status, label/keyboard/disabled states and transparency slider.');
+  console.log('Layer tiles browser PASS: nine viewports including whole-island mode, content-sized panel, adaptive three/two columns, 44px targets, containment, scrolling, long status, label/keyboard/disabled states and transparency slider.');
   console.log(JSON.stringify(reports.map(r=>({viewport:`${r.width}x${r.height}`,panelWidth:r.panel.width,panelHeight:r.panel.height,contentHeight:r.scrollHeight,gridHeight:r.grid.height}))));
   console.log('Screenshots: '+output);
 }finally{
