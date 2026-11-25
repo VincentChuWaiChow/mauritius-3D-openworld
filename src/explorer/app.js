@@ -4,7 +4,7 @@ import {withLandmarks,nearbyLandmarks,sceneryVegetationArea} from './landmarks.j
 import {searchPlaces,panelAlpha} from './search.js';
 import {TerrainSurface} from './surface.js';
 import {TileStore,visibleTileKeys} from './streaming.js';
-import {trafficTile, readTraffic, refreshMs, congestionColors} from './traffic.js';
+import {trafficTile, readTraffic, refreshMs, congestionColors, normalizeTrafficToken} from './traffic.js';
 import {ribbon,roadPass} from './road-ribbon.js';
 import * as THREE from 'three';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
@@ -229,8 +229,16 @@ async function selectRoad(road){
  }catch(error){if(token===roadSelectionVersion&&!request.signal.aborted){$('road-selection-status').textContent='Road geometry unavailable. Select the result again to retry.';}}
  finally{if(roadSelectionRequest===request)roadSelectionRequest=null;}
 }
-const trafficToken = import.meta.env.VITE_MAPBOX_PUBLIC_TOKEN || '';
+let trafficToken = normalizeTrafficToken(import.meta.env.VITE_MAPBOX_PUBLIC_TOKEN);
 let trafficRequest, trafficKey = '', nextTrafficRead = 0, trafficLines = [], trafficStatus = '';
+function applyTrafficToken(token) {
+ trafficRequest?.abort(); trafficRequest = null;
+ trafficToken = token; trafficKey = ''; nextTrafficRead = 0;
+ trafficLines = []; trafficStatus = '';
+ $('flow-enabled').disabled = !token;
+ if (!token) $('flow-enabled').checked = false;
+ drawTraffic(); updateTraffic();
+}
 function drawTraffic() {
  const layer = groups.flow;
  if (!layer) return;
@@ -585,8 +593,23 @@ let drawWeather;
 function setupInteraction(){
  drawWeather=mountWeather({toggle:$('weather-enabled'),status:$('weather-status'),canvas:$('weather-effects')});
  setupSearch();
- $('flow-enabled').disabled=!trafficToken.startsWith('pk.');
+ $('flow-enabled').disabled=!trafficToken;
  $('flow-enabled').onchange=updateTraffic;
+ const tokenInput=$('traffic-token'),tokenStatus=$('traffic-token-status');
+ tokenInput.value=trafficToken;
+ if(trafficToken)tokenStatus.textContent='Build-time public token ready. Apply another to replace it for this page.';
+ $('traffic-token-form').onsubmit=e=>{
+  e.preventDefault();
+  const value=tokenInput.value.trim(),token=normalizeTrafficToken(value);
+  if(value&&!token){tokenInput.setAttribute('aria-invalid','true');tokenStatus.textContent='Not applied. Use a public pk. token, never a secret sk. token. The current token is unchanged.';return;}
+  tokenInput.removeAttribute('aria-invalid');tokenInput.value=token;
+  applyTrafficToken(token);
+  tokenStatus.textContent=token?($('flow-enabled').checked?'Public token applied. Traffic refresh requested.':'Public token applied. Enable Mapbox traffic to test.'):'Token cleared for this page. Traffic is off.';
+ };
+ $('clear-traffic-token').onclick=()=>{
+  tokenInput.value='';tokenInput.removeAttribute('aria-invalid');applyTrafficToken('');
+  tokenStatus.textContent='Token cleared for this page. Traffic is off.';
+ };
  $('clear-road').onclick=()=>{clearRoadSelection();$('search-status').textContent='Road selection cleared. Search another road or place.';};
  $('destinations').innerHTML=data.regions.map(r=>`<button class="destination" data-region="${r.id}"><span class="destination-icon">${r.icon}</span><span><strong>${r.name}</strong><small>${r.tag}</small></span></button>`).join('');document.querySelectorAll('.destination').forEach(b=>b.onclick=()=>goRegion(b.dataset.region));
  $('overview').onclick=()=>{clearRoadSelection();dismissSearch();streetRequest?.abort();roamingRegion=null;roamGeneration++;roamKey='';demActive=false;buildWorld(current,true);$('region-tag').textContent='ONE ISLAND. MANY LITTLE WORLDS.';$('region-name').innerHTML='Mauritius<span>.</span>';$('region-description').textContent='Point at any part of the island and scroll into its streets. This is the main island, shaped by OpenStreetMap.';$('world-status').textContent='The whole island';$('overview').classList.add('active');document.querySelectorAll('.destination').forEach(b=>b.classList.remove('active'));pose(fromGeo([57.565,-20.265]),true,true);void requestElevation();};

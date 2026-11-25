@@ -219,13 +219,37 @@ accuracy are not established by it.
 
 ## Optional traffic overlay in the main explorer
 
-Set `VITE_MAPBOX_PUBLIC_TOKEN=pk.…` in an ignored `.env.local` before starting Vite, or set the same GitHub Actions repository variable before building Pages. Use a URL-restricted public token with an account entitled to Mapbox Traffic. Requests from each browser count against the account. Check Traffic entitlement and the account's current pricing before enabling it publicly.
+Open **Layers & Style → Mapbox public token**, paste your public `pk.` token and
+select **Apply & refresh**. Then enable **Mapbox traffic · centre tile**. Replacing
+or reapplying a token refreshes an already-enabled traffic layer in place: no page
+reload, rebuild or Vite restart. Typing alone does not send requests. **Clear**
+removes the token for this page and turns traffic off, including pending requests.
+Secret `sk.` tokens are rejected; format screening does not prove provider access.
+
+The entered token is masked and held only in page memory, not application storage,
+page URLs or server configuration. A full page reload discards the override.
+Optional `VITE_MAPBOX_PUBLIC_TOKEN=pk.…` in ignored `.env.local` (or the GitHub
+Actions repository variable before building Pages) remains the build-time default;
+changing that environment value still requires a restart/rebuild. Never use a
+secret token in a `VITE_` variable, which is bundled for the browser.
+
+Use a [URL-restricted public token](https://docs.mapbox.com/accounts/guides/tokens/#url-restrictions)
+and allow the exact testing origin, including localhost when testing locally.
+Tokens go directly from the browser to Mapbox. Traffic availability, account
+entitlement and usage limits remain account-specific; check the account before
+enabling the overlay publicly. No token or real traffic sample is bundled.
 
 Open **Layers & Style → Mapbox traffic · centre tile** in street view. The overlay requests the zoom-14 vector tile beneath the camera target and refreshes it every eight minutes while stationary. Panning across a tile boundary makes an additional request. The timestamp records retrieval. Empty tiles and access errors are shown separately. After an error, the next automatic attempt follows the same interval; toggle off and on to retry sooner. Colour describes provider-reported congestion; simulated cars remain illustrative and independent. No provider credential or Mauritius traffic sample is bundled.
 
 Validate coverage with a real token in Port Louis, at Phoenix and on a quieter road. Record non-empty directional features, tile coordinates and fetch times in peak and off-peak periods before advertising local coverage. Inspect opposing carriageways and grade-separated junctions; the overlay uses ground-level ribbons, omits tunnels and does not reconstruct bridge-deck heights.
 
-Offline browser regression: start Vite with `VITE_MAPBOX_PUBLIC_TOKEN=pk.fixture npm run dev`, then run `APP_URL=<local Vite URL> CHROME_DEBUG_URL=<local Chrome debugger URL> node scripts/check-traffic-browser.mjs`. The checker mocks provider responses and blocks external fetches. Run again against Vite without a token with `EXPECT_TRAFFIC_TOKEN=0` to check the disabled state. This does not verify live coverage or native GPU performance.
+Offline browser regression: run Vite or a production preview, then run
+`APP_URL=<local URL> CHROME_DEBUG_URL=<local Chrome debugger URL> EXPECT_TRAFFIC_TOKEN=0 node scripts/check-traffic-browser.mjs`
+for a build without a default token. Omit `EXPECT_TRAFFIC_TOKEN=0` for a
+`VITE_MAPBOX_PUBLIC_TOKEN=pk.fixture` build. Both modes exercise runtime token
+application, replacement, clearing and the traffic lifecycle with fixture tokens.
+The checker mocks provider responses and blocks external requests. It does not
+verify live coverage, account entitlement or native GPU performance.
 
 ### Regional weather simulation
 

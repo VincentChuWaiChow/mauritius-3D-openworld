@@ -3,6 +3,11 @@ export const congestionColors = Object.freeze({
   low: '#16865c', moderate: '#e5ac25', heavy: '#e86c29', severe: '#bd283f', closed: '#842476'
 });
 
+export function normalizeTrafficToken(value) {
+  const token = typeof value === 'string' ? value.trim() : '';
+  return /^pk\.\S+$/.test(token) ? token : '';
+}
+
 export function trafficTile([lon, lat], zoom = 14) {
   const count = 2 ** zoom;
   const x = Math.floor((lon + 180) / 360 * count);

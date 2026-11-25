@@ -1,4 +1,4 @@
-// Run against local Vite with VITE_MAPBOX_PUBLIC_TOKEN=pk.fixture, never a real token.
+// Use fixture tokens only. EXPECT_TRAFFIC_TOKEN=0 tests a build without a default.
 // All provider requests are mocked; this does not establish Mauritius coverage.
 import assert from 'node:assert/strict';
 import {PbfWriter} from 'pbf';
@@ -53,19 +53,28 @@ const waitFor = async (expression, label) => {
 const toggle = () => ev("document.getElementById('flow-enabled').click()");
 const mock = () => ev('({calls:__trafficMock.calls.length,aborted:__trafficMock.aborted})');
 const decoderRequests = () => requests.filter(path => /(?:vector[-_]tile|\/pbf)[^/]*\.js$/.test(path));
+const enterToken = value => ev(`document.getElementById('traffic-token').value=${JSON.stringify(value)};document.getElementById('traffic-token').dispatchEvent(new Event('input',{bubbles:true}))`);
+const applyToken = async value => {await enterToken(value);await ev("document.getElementById('traffic-token-form').requestSubmit()");};
+const clearToken = () => ev("document.getElementById('clear-traffic-token').click()");
 try {
   await send('Page.enable');
   await send('Runtime.enable');
   await send('Network.enable');
+  await send('Network.setBlockedURLs', {urls:['https://*']});
   await send('Page.addScriptToEvaluateOnNewDocument', {source: `
     const originalFetch = window.fetch.bind(window), originalNow = Date.now;
-    window.__trafficMock = {calls: [], pending: [], aborted: 0, mode: 200, offset: 0};
+    window.__trafficMock = {calls: [], tokens: [], pending: [], aborted: 0, mode: 200, offset: 0, storageWrites:0};
+    const writeStorage=Storage.prototype.setItem;
+    Storage.prototype.setItem=function(...args){__trafficMock.storageWrites++;return writeStorage.apply(this,args);};
+    const getContext=HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext=function(type,...args){return /webgl/.test(type)?null:getContext.call(this,type,...args);};
     Date.now = () => originalNow() + __trafficMock.offset;
     window.fetch = async (input, options = {}) => {
       const url = new URL(input instanceof Request ? input.url : input, location.href);
       if (url.hostname === 'api.mapbox.com') {
         const mock = __trafficMock;
         mock.calls.push(url.pathname);
+        mock.tokens.push(url.searchParams.get('access_token'));
         options.signal?.addEventListener('abort', () => mock.aborted++, {once: true});
         const response = () => new Response(Uint8Array.from(atob(${JSON.stringify(body)}), c => c.charCodeAt(0)));
         if (mock.mode === 'hold') return new Promise(resolve => mock.pending.push(() => resolve(response())));
@@ -82,10 +91,22 @@ try {
   assert.equal((await mock()).calls, 0, 'Traffic must be opt-in');
   assert.equal(decoderRequests().length, 0, 'Traffic decoders must not load at startup');
   assert.equal(await ev("document.getElementById('flow-enabled').disabled"), process.env.EXPECT_TRAFFIC_TOKEN === '0');
+  await ev('window.__trafficInitialHook=__MU_TEST__;window.__trafficPageMarker="same-page"');
+  assert.equal(await ev("document.getElementById('traffic-token').type"),'password');
+  await enterToken('sk.fixture-do-not-send');await sleep(250);
+  assert.equal((await mock()).calls,0,'Typing alone must not send requests');
+  await ev("document.getElementById('traffic-token-form').requestSubmit()");
+  assert.equal(await ev("document.getElementById('traffic-token').getAttribute('aria-invalid')"),'true');
+  assert.equal((await mock()).calls,0,'Secret tokens must never be submitted to Mapbox');
+  assert.equal(await ev("document.getElementById('traffic-token-status').textContent.includes('sk.fixture-do-not-send')"),false);
+  await applyToken('  pk.fixture-runtime-A  ');
+  assert.equal(await ev("document.getElementById('flow-enabled').disabled"),false);
+  assert.equal(await ev("document.getElementById('flow-enabled').checked"),false,'Applying must preserve opt-in');
+  assert.equal((await mock()).calls,0);
   await waitFor("document.querySelector('#flow-credit img').complete", 'logo load');
   assert.ok(await ev("document.querySelector('#flow-credit img').naturalWidth > 0"),
     'Logo must be a decodable SVG: ' + await ev("JSON.stringify({src:document.querySelector('#flow-credit img').src,complete:document.querySelector('#flow-credit img').complete})"));
-  if (process.env.EXPECT_TRAFFIC_TOKEN !== '0') {
+  {
     await ev("__trafficMock.mode = 'empty'"); await toggle();
     await waitFor("document.getElementById('flow-status').textContent.includes('No reported')", 'empty 200 coverage');
     assert.equal(decoderRequests().length, 0, 'Empty responses must not download decoders');
@@ -96,6 +117,33 @@ try {
     const vertices = await ev('__MU_TEST__().trafficVertices');
     assert(vertices > 0);
     assert.equal(await ev("document.getElementById('flow-credit').hidden"), false);
+
+    // Changing credentials must discard old work even for the same centre tile.
+    assert.equal(await ev('__trafficMock.tokens.at(-1)'),'pk.fixture-runtime-A');
+    await ev("__trafficMock.mode='hold'");await applyToken('pk.fixture-runtime-A');
+    await waitFor('__trafficMock.pending.length===1','pending old-token request');
+    assert.equal(await ev('__MU_TEST__().trafficMeshes'),0,'Reapply disposes previous ribbons');
+    const beforeReplacement=(await mock()).aborted;
+    await ev('__trafficMock.mode=200');await applyToken('pk.fixture-runtime-B');
+    assert((await mock()).aborted>beforeReplacement,'Replacement aborts the previous token request');
+    await waitFor('__trafficMock.tokens.at(-1)==="pk.fixture-runtime-B" && __MU_TEST__().trafficLines===1','in-place replacement');
+    await ev('__trafficMock.pending.shift()()');await sleep(250);
+    assert.equal(await ev('__MU_TEST__().trafficLines'),1,'Late old-token failure must not clear fresh traffic');
+    assert.equal(await ev('__MU_TEST__===__trafficInitialHook && __trafficPageMarker==="same-page"'),true,'Token apply must not reload or reinitialize the scene');
+    const beforeTyping=(await mock()).calls;
+    await enterToken('pk.fixture-typing-only');await sleep(350);
+    assert.equal((await mock()).calls,beforeTyping,'Typing with traffic active must not send a request');
+    assert.equal(await ev('__trafficMock.tokens.at(-1)'),'pk.fixture-runtime-B','Typing must not replace the applied token');
+    assert.equal(await ev('__MU_TEST__().trafficLines'),1);
+    await ev('__trafficMock.mode=403');await applyToken('pk.fixture-runtime-B');
+    await waitFor("document.getElementById('flow-status').textContent.includes('403')",'replacement error');
+    await ev('__trafficMock.mode=200');await applyToken('pk.fixture-runtime-B');
+    await waitFor('__MU_TEST__().trafficLines===1','same-token Apply retries without toggle or restart');
+    const beforeInvalid=(await mock()).calls;
+    await applyToken('sk.fixture-rejected');await sleep(250);
+    assert.equal((await mock()).calls,beforeInvalid,'Rejected replacement leaves current token unchanged');
+    assert.equal(await ev('__MU_TEST__().trafficLines'),1);
+
     const first = await mock();
     await sleep(1200);
     assert.equal((await mock()).calls, first.calls, 'Stationary camera must not fetch every frame');
@@ -123,6 +171,22 @@ try {
     await waitFor("document.getElementById('flow-status').textContent.includes('403')", 'access error');
     await toggle(); await ev('__trafficMock.mode = 200'); await toggle();
     await waitFor('__MU_TEST__().trafficLines === 1', 'manual retry');
+
+    await ev("__trafficMock.mode='hold'");await applyToken('pk.fixture-runtime-C');
+    await waitFor('__trafficMock.pending.length===1','request before Clear');
+    const beforeClear=(await mock()).aborted;await clearToken();
+    assert((await mock()).aborted>beforeClear,'Clear aborts pending traffic');
+    assert.equal(await ev("document.getElementById('flow-enabled').disabled && !document.getElementById('flow-enabled').checked"),true);
+    assert.equal(await ev("document.getElementById('traffic-token').value"),'');
+    assert.equal(await ev('__MU_TEST__().trafficMeshes'),0);
+    assert.equal(await ev("document.getElementById('flow-credit').hidden"),true);
+    const clearedCalls=(await mock()).calls;
+    await ev('__trafficMock.pending.shift()();__trafficMock.offset+=480001');await sleep(300);
+    assert.equal((await mock()).calls,clearedCalls,'Cleared token must not refresh');
+    assert.equal(await ev('__MU_TEST__().trafficMeshes'),0,'Late cleared response ignored');
+    await ev('__trafficMock.mode=200');await applyToken('pk.fixture-runtime-C');await toggle();
+    await waitFor('__MU_TEST__().trafficLines===1','enable new token after Clear');
+
     const previousKey = await ev('__MU_TEST__().trafficKey');
     await ev("document.querySelector('[data-region=grand-baie]').click()");
     await waitFor(`__MU_TEST__().trafficKey !== ${JSON.stringify(previousKey)} && __MU_TEST__().trafficLines === 1`, 'new centre tile');
@@ -132,11 +196,17 @@ try {
     const overviewCalls = (await mock()).calls;
     await ev('__trafficMock.offset += 480001'); await sleep(1000);
     assert.equal((await mock()).calls, overviewCalls, 'Overview must not fetch traffic');
-  } else {
-    assert.match(await ev("document.getElementById('flow-status').textContent"), /public token/);
   }
+  assert.equal(await ev('__trafficMock.storageWrites'),0,'Runtime tokens must not be persisted');
+  assert.equal(await ev("JSON.stringify(__MU_TEST__()).includes('pk.fixture-runtime')"),false,'Debug state must not expose the token');
+  assert.equal(await ev("location.href.includes('pk.fixture-runtime')"),false,'Page URL must not contain the token');
+  await applyToken('pk.fixture-reload-clears');
+  await send('Page.reload');
+  await waitFor('window.__MU_TEST__?.().region && !window.__trafficPageMarker','full page reload');
+  assert.equal(await ev("document.getElementById('traffic-token').value.includes('pk.fixture-runtime') || document.getElementById('traffic-token').value==='pk.fixture-reload-clears'"),false,'Reload must discard runtime overrides');
+  assert.equal(await ev("document.getElementById('flow-enabled').disabled"),process.env.EXPECT_TRAFFIC_TOKEN==='0','Reload restores only the build-time default');
   assert.deepEqual(errors, []);
-  console.log('Traffic browser PASS: mocked provider, token gate, SVG' + (process.env.EXPECT_TRAFFIC_TOKEN === '0' ? '' : ', rendering, refresh, cancellation, errors, tile change, overview cleanup'));
+  console.log('Traffic browser PASS: runtime public-token apply/replace/retry/Clear, no page restart or storage, reload reset, token gate, lazy decoders, SVG, rendering, refresh, cancellation, errors, tile change and overview cleanup; provider mocked.');
 } finally {
   ws.close();
   await fetch(debuggerURL + '/json/close/' + tab.id);

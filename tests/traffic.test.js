@@ -1,9 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {PbfWriter} from 'pbf';
-import {readTraffic, trafficTile, trafficLines, refreshMs} from '../src/explorer/traffic.js';
+import {readTraffic, trafficTile, trafficLines, refreshMs, normalizeTrafficToken} from '../src/explorer/traffic.js';
 
 const tile = trafficTile([57.50, -20.16]);
+test('runtime traffic tokens accept trimmed public tokens only',()=>{
+  assert.equal(normalizeTrafficToken('  pk.fixture-token.part_2\n'),'pk.fixture-token.part_2');
+  for(const value of ['', 'pk.', 'sk.fixture-secret', 'tk.fixture', 'PK.fixture', 'pk.has space', 'pk.line\nbreak', null, undefined, 42, {}]){
+    assert.equal(normalizeTrafficToken(value),'',String(value));
+  }
+});
+
+test('token format screening never starts provider requests',t=>{
+  const fetch=t.mock.method(globalThis,'fetch',()=>{throw Error('Unexpected provider request');});
+  normalizeTrafficToken('pk.fixture');normalizeTrafficToken('sk.fixture');normalizeTrafficToken('');
+  assert.equal(fetch.mock.callCount(),0);
+});
+
 test('decode a directional congestion line from a binary vector tile', async t => {
   const pbf = new PbfWriter();
   pbf.writeMessage(3, (_, layer) => {
