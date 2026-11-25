@@ -72,8 +72,10 @@ existing material colors and retry on the next scene rebuild; successful texture
 remain shared.
 
 Decorative trees require clearance for their entire canopy from loaded building
-footprints and road casings, not just their trunks. Illustrated street widths fit
-around those footprints; paths and cycleways no longer use car-road widths. The
+footprints and road casings, not just their trunks. Streets keep their nominal
+illustrated width: only the actual building-footprint overlap is cut from their
+surface, rather than pinching both edges toward a nearby wall. Source roads and
+buildings are not moved. Paths and cycleways use narrower illustrated widths. The
 OSM coordinates are unchanged. Bundled roads lack bridge/tunnel/layer metadata, so
 this ground-surface layout does not establish which real crossings are elevated.
 

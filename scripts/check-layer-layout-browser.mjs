@@ -28,6 +28,7 @@ const wait=async expression=>{for(let i=0;i<100;i++){if(await ev(expression))ret
 const reports=[];
 try{
   await send('Page.enable');await send('Runtime.enable');await send('Network.enable');
+  await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
   await send('Network.setBlockedURLs',{urls:['https://*']});
   await send('Page.addScriptToEvaluateOnNewDocument',{source:`
     const context=HTMLCanvasElement.prototype.getContext;
@@ -35,13 +36,42 @@ try{
     const f=window.fetch.bind(window);
     window.fetch=(input,options)=>new URL(input instanceof Request?input.url:input,location.href).origin===location.origin?f(input,options):Promise.resolve(new Response(null,{status:503}));
   `});
-  await send('Page.navigate',{url:app});await wait('window.__MU_TEST__?.().region');
+  await send('Page.navigate',{url:app});await wait('window.__MU_TEST__?.().region && document.querySelector("#loading").hidden && typeof document.querySelector("#layers-button").onclick==="function"');
+  assert.equal(await ev("getComputedStyle(document.querySelector('.progress i')).animationName"),'none','Loading animation respects reduced motion');
   await ev("document.querySelector('#layers-button').click()");
   assert.equal(await ev("document.querySelector('#layers-button').getAttribute('aria-expanded')"),'true');
   await mkdir(output,{recursive:true});
   for(const [width,height] of [[1440,900],[768,1024],[600,900],[480,800],[420,812],[375,812],[320,640],[960,540]]){
     await send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
-    await sleep(250);
+    // A software-renderer resize can arrive after the emulation command. Check
+    // settled geometry, rather than treating its previous canvas size as overflow.
+    await wait('Math.abs(document.querySelector("#world canvas").getBoundingClientRect().width-innerWidth)<1');
+    await ev("document.querySelector('#close-layers').click()");
+    assert.equal(await ev("document.activeElement.id"),'layers-button','Close restores disclosure focus');
+    const closed=await ev(`(()=>{
+      const rect=e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height}};
+      const overlap=(a,b)=>a.x<b.right&&a.right>b.x&&a.y<b.bottom&&a.bottom>b.y;
+      const tools=rect(document.querySelector('.right-tools')),rail=rect(document.querySelector('.explore-rail')),dock=rect(document.querySelector('footer'));
+      const small=[];for(const e of document.querySelectorAll('body *')){
+        const s=getComputedStyle(e);if(s.visibility==='hidden'||s.display==='none')continue;
+        for(const n of e.childNodes)if(n.nodeType===3&&n.textContent.trim()){
+          const range=document.createRange();range.selectNode(n);const r=range.getBoundingClientRect();
+          if(r.width&&r.height&&parseFloat(s.fontSize)<11)small.push({text:n.textContent.trim(),size:s.fontSize});
+        }
+      }
+      return {controls:[...document.querySelectorAll('.right-tools > button,#layers-button,#help,#overview')].map(rect),
+        overlap:overlap(tools,rail)||overlap(tools,dock)||overlap(rail,dock),small,
+        overflow:document.documentElement.scrollWidth>innerWidth};
+    })()`);
+    assert.equal(closed.overflow,false,JSON.stringify({width,closed}));
+    assert.equal(closed.overlap,false,'Closed tools, search rail and town dock must not overlap: '+width);
+    assert.deepEqual(closed.small,[],'Visible functional text must be at least 11px');
+    for(const c of closed.controls)assert.ok(c.width>=44&&c.height>=44&&c.x>=0&&c.right<=width&&c.y>=0&&c.bottom<=height,JSON.stringify({width,c}));
+    const closedShot=await send('Page.captureScreenshot',{format:'png'});
+    await writeFile(`${output}/closed-${width}x${height}.png`,Buffer.from(closedShot.data,'base64'));
+    await ev("document.querySelector('#layers-button').click()");
+    assert.equal(await ev("document.activeElement.id"),'close-layers','Opening focuses the visible exit');
+    assert.equal(await ev("(()=>{const e=document.querySelector('#close-layers'),r=e.getBoundingClientRect();return e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))})()"),true,'Close must not be behind another overlay');
     const layout=await ev(`(()=>{
       const p=document.querySelector('#layers-panel'),grid=p.querySelector('.layer-grid');p.scrollTop=0;
       const rect=e=>{const r=e.getBoundingClientRect();return {x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom,right:r.right}};
@@ -101,6 +131,13 @@ try{
   }
   await ev("document.querySelector('#panel-transparency').value=40;document.querySelector('#panel-transparency').dispatchEvent(new Event('input',{bubbles:true}))");
   assert.equal(await ev("document.querySelector('#transparency-value').value"),'40%');
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+  assert.equal(await ev("document.querySelector('#layers-panel').hidden"),true);
+  assert.equal(await ev("document.querySelector('#layers-button').getAttribute('aria-expanded')"),'false');
+  assert.equal(await ev("document.activeElement.id"),'layers-button','Escape restores trigger focus');
+  await ev("document.querySelector('#place-query').focus()");
+  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
+  assert.equal(await ev("document.activeElement.id"),'place-query','Closed settings must not steal search focus');
   assert.deepEqual(errors,[]);
   await writeFile(`${output}/measurements.json`,JSON.stringify(reports,null,2));
   console.log('Layer tiles browser PASS: eight viewports, adaptive three/two columns, 44px targets, containment, scrolling, long status, label/keyboard/disabled states and transparency slider.');

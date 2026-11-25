@@ -52,19 +52,21 @@ function box(g,c,x,y,z,w,h,d){let x0=x-w/2,x1=x+w/2,z0=z-d/2,z1=z+d/2,y1=y+h;qua
 function cone(g,c,x,y,z,r,h,sides=6){for(let i=0;i<sides;i++){let a=i/sides*Math.PI*2,b=(i+1)/sides*Math.PI*2;tri(g,c,[x+Math.cos(a)*r,y,z+Math.sin(a)*r],[x,y+h,z],[x+Math.cos(b)*r,y,z+Math.sin(b)*r]);}}
 function polygon(g,c,pts,y){if(pts.length<3)return;const contour=pts.map(p=>new THREE.Vector2(p.x,p.z));const indices=THREE.ShapeUtils.triangulateShape(contour,[]);const offset=v=>g.name==='buildings'?0:groundY(v);for(const [a,b,d] of indices)tri(g,c,[pts[a].x,offset(pts[a])+y,pts[a].z],[pts[d].x,offset(pts[d])+y,pts[d].z],[pts[b].x,offset(pts[b])+y,pts[b].z]);}
 function groundY(point){return demActive&&surface?surface.sceneHeight(point):0;}
-function path(g,c,pts,width,y,outerWidth=width){
+function path(g,c,pts,width,y,layout=null){
  const samples=[];
  for(let i=0;i<pts.length;i++){
    const b=pts[i],a=pts[i-1]??b, dx=b.x-a.x,dz=b.z-a.z;
    const n=demActive?Math.min(60,Math.max(1,Math.ceil(Math.hypot(dx,dz)/6))):1;
    for(let j=1;j<=n;j++){
      const x=a.x+dx*j/n,z=a.z+dz*j/n;
-     samples.push({x,z,y:groundY({x,z})+y,maxReach:Math.min(a.maxReach??Infinity,b.maxReach??Infinity)*width/outerWidth});
+     samples.push({x,z,y:groundY({x,z})+y});
    }
  }
  ribbon(samples,width,(a,b,d,e)=>{
-  if(demActive&&surface)surface.drape([a,b,d,e].map(p=>[p[0],p[2]]),y,(v1,v2,v3)=>tri(g,c,v1,v2,v3));
-  else quad(g,c,a,b,d,e);
+  for(const patch of layout?layout.clipRoad([a,b,d,e]):[[a,b,d,e]]){
+   if(demActive&&surface)surface.drape(patch.map(p=>[p[0],p[2]]),y,(v1,v2,v3)=>tri(g,c,v1,v2,v3));
+   else for(let i=1;i<patch.length-1;i++)tri(g,c,patch[0],patch[i],patch[i+1]);
+  }
  });
 }
 function materialFor(group,color){
@@ -316,9 +318,9 @@ function buildWorld(region,isOverview=false){clearWorld();if(region.id!=='free')
  const streetLayout=isOverview?null:createStreetLayout(region.buildings.map(b=>b.points.slice(0,-1).map(fromGeo)),projectedRoads);
  for(const r of streetLayout?.roads??projectedRoads){
   const {width,casing}=r.style??roadStyle(r.kind),pts=r.points;
-  path(road,colors.sidewalk,pts,isOverview?Math.max(width,6):casing,.045,casing);
-  path(road,colors.roads,pts,isOverview?Math.max(width*.8,4):width,.055,casing);
-  if(!isOverview&&['motorway','trunk','primary','secondary'].includes(r.kind))path(road,'#d6d7bd',pts,.04,.065,casing);
+  path(road,colors.sidewalk,pts,isOverview?Math.max(width,6):casing,.045,streetLayout);
+  path(road,colors.roads,pts,isOverview?Math.max(width*.8,4):width,.055,streetLayout);
+  if(!isOverview&&['motorway','trunk','primary','secondary'].includes(r.kind))path(road,'#d6d7bd',pts,.04,.065,streetLayout);
  }
  if(!isOverview){
  for(const p of region.parks)polygon(nature,colors.park,p.slice(0,-1).map(fromGeo),.075);
@@ -648,7 +650,13 @@ function setupInteraction(){
  for(const [id,factor]of [['zoom-in',1.3],['zoom-out',1/1.3]])$(id).onclick=()=>{queueZoom(1/factor);};
  $('rotate').onclick=()=>{controls.autoRotate=!controls.autoRotate;$('rotate').classList.toggle('active',controls.autoRotate);$('rotate').setAttribute('aria-pressed',String(controls.autoRotate));dirty=true;};
  $('top').onclick=()=>{topMode=!topMode;controls.autoRotate=false;$('rotate').classList.remove('active');$('rotate').setAttribute('aria-pressed','false');$('top').classList.toggle('active',topMode);$('top').setAttribute('aria-pressed',String(topMode));controls.enableRotate=!topMode;const target=controls.target.clone();camera.position.copy(target).add(topMode?vector(0,overviewMode?7000:230,.01):vector(overviewMode?1700:90,overviewMode?7000:170,overviewMode?3900:130));controls.update();dirty=true;};
- $('layers-button').onclick=()=>{const panel=$('layers-panel');panel.hidden=!panel.hidden;$('layers-button').setAttribute('aria-expanded',String(!panel.hidden));};document.querySelectorAll('[data-layer]').forEach(input=>input.onchange=()=>{groups[input.dataset.layer].visible=input.checked;dirty=true;});$('labels-check').onchange=()=>dirty=true;$('height').oninput=()=>{heightScale=+$('height').value;$('height-value').value=heightScale+'×';buildWorld(roamingRegion??current,overviewMode);dirty=true;};
+ const setLayers=open=>{
+  $('layers-panel').hidden=!open;$('layers-button').setAttribute('aria-expanded',String(open));
+  (open?$('close-layers'):$('layers-button')).focus();
+ };
+ $('layers-button').onclick=()=>setLayers($('layers-panel').hidden);
+ $('close-layers').onclick=()=>setLayers(false);
+ document.querySelectorAll('[data-layer]').forEach(input=>input.onchange=()=>{groups[input.dataset.layer].visible=input.checked;dirty=true;});$('labels-check').onchange=()=>dirty=true;$('height').oninput=()=>{heightScale=+$('height').value;$('height-value').value=heightScale+'×';buildWorld(roamingRegion??current,overviewMode);dirty=true;};
  $('theme').onchange=()=>{themeId=$('theme').value;Object.assign(colors,THEMES[themeId]);scene.background.set(colors.water);buildWorld(roamingRegion??current,overviewMode);dirty=true;};
  $('terrain-enabled').onchange=()=>{void requestElevation();};
  $('help').onclick=$('credits-button').onclick=()=>$('about').showModal();$('close-about').onclick=()=>$('about').close();$('about').onclick=e=>{if(e.target===$('about'))$('about').close()};$('close-detail').onclick=()=>$('detail').hidden=true;
@@ -669,7 +677,7 @@ function setupInteraction(){
   if(await loadRoadData(true)){if(token!==roadTapVersion)return;const hit=pickVisibleRoad(x,y,e.pointerType==='touch'?20:8,true);if(hit)void selectRoad(hit.road);}
  });
 
- window.addEventListener('resize',resize);document.addEventListener('keydown',e=>{if(e.key==='Escape'){clearRoadSelection();$('detail').hidden=true;$('layers-panel').hidden=true;controls.autoRotate=false;}if(e.key.toLowerCase()==='r'&&!$('about').open&&!e.target.closest?.('input,textarea,select,[contenteditable=true]'))$('reset').click();});
+ window.addEventListener('resize',resize);document.addEventListener('keydown',e=>{if(e.key==='Escape'){clearRoadSelection();$('detail').hidden=true;if(!$('layers-panel').hidden)setLayers(false);controls.autoRotate=false;}if(e.key.toLowerCase()==='r'&&!$('about').open&&!e.target.closest?.('input,textarea,select,[contenteditable=true]'))$('reset').click();});
 }
 function animateCars(time){
  if(!groups.traffic?.visible||overviewMode||time===lastCarTime)return;

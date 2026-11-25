@@ -16,7 +16,7 @@ export function ribbon(points, width, emit) {
     const b=normals[i] ?? (closed ? normals[0] : normals.at(-1));
     const mx=a.x+b.x, mz=a.z+b.z, length=Math.hypot(mx,mz);
     const nx=length>.001?mx/length:b.x, nz=length>.001?mz/length:b.z;
-    const reach=Math.min(width*.5/Math.max(.5,nx*b.x+nz*b.z),p.maxReach??Infinity);
+    const reach=width*.5/Math.max(.5,nx*b.x+nz*b.z);
     return [[p.x+nx*reach,p.y,p.z+nz*reach],[p.x-nx*reach,p.y,p.z-nz*reach]];
   });
   for(let i=1;i<pairs.length;i++)emit(pairs[i-1][0],pairs[i-1][1],pairs[i][1],pairs[i][0]);
