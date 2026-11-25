@@ -1,4 +1,4 @@
-import {Vector3} from 'three';
+import {Matrix4,Vector3} from 'three';
 import {project} from './geo.js';
 
 export const sites = [
@@ -37,14 +37,16 @@ const noise = n=>frac(Math.sin(n*91.7+23)*43871);
 export function mountWeather({toggle,status,canvas}) {
   const ctx = canvas.getContext('2d');
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
-  let samples=[],nextRead=0,pending=null,lastDraw=-Infinity,clockSeconds=0,message='';
+  let samples=[],nextRead=0,pending=null,lastDraw=-Infinity,lastFrame,clockMs=0,message='';
+  let lastWidth,lastHeight,lastWide,lastGround,lastTerrain,lastReduced;
   const position = new Vector3();
+  const lastTarget = new Vector3(),lastWorld = new Matrix4(),lastProjection = new Matrix4();
   function report(value) { if(status.textContent!==value)status.textContent=value; }
   function clear() { if(ctx)ctx.clearRect(0,0,canvas.width,canvas.height); }
   toggle.onchange = () => {
     canvas.hidden=!toggle.checked;
     if(!toggle.checked){if(pending){pending.abort();nextRead=0;}pending=null;clear();report('');}
-    lastDraw=-Infinity;
+    lastDraw=-Infinity;lastFrame=undefined;
   };
   async function refresh(now) {
     const request = new AbortController();
@@ -60,17 +62,27 @@ export function mountWeather({toggle,status,canvas}) {
       if(pending===request)message='Weather refresh unavailable.';
     } finally {
       clearTimeout(timer);
-      if(pending===request)pending=null;
+      if(pending===request){pending=null;lastDraw=-Infinity;}
     }
   }
-  return function draw({time,camera,target,wide,ground}) {
-    if(!toggle.checked || document.hidden || time-lastDraw<80)return;
-    if(!reduced.matches)clockSeconds+=Math.min(.15,(time-lastDraw)/1000);
+  return function draw({time,camera,target,wide,ground,terrain}) {
+    if(!toggle.checked || document.hidden){lastFrame=undefined;lastDraw=-Infinity;return;}
+    const reduceMotion=reduced.matches;
+    // Advance from frame timestamps, independent of redraws and bounded after suspension.
+    if(!reduceMotion && lastReduced!==true && lastFrame!==undefined)clockMs+=Math.min(150,Math.max(0,time-lastFrame));
+    lastFrame=time;
+    const width=canvas.clientWidth,height=canvas.clientHeight;
+    const changed=width!==lastWidth || height!==lastHeight || wide!==lastWide ||
+      reduceMotion!==lastReduced || !lastTarget.equals(target) || !lastWorld.equals(camera.matrixWorld) ||
+      !lastProjection.equals(camera.projectionMatrix) || (wide && (ground!==lastGround || terrain!==lastTerrain));
+    if(!changed && time-lastDraw<80)return;
     lastDraw=time;
+    lastWidth=width;lastHeight=height;lastWide=wide;lastGround=ground;lastTerrain=terrain;lastReduced=reduceMotion;
+    lastTarget.copy(target);lastWorld.copy(camera.matrixWorld);lastProjection.copy(camera.projectionMatrix);
+    const clockSeconds=clockMs/1000;
     const now=Date.now();
     if(!pending && now>=nextRead)void refresh(now);
     samples=samples.filter(s=>now-s.time*1000<=maxAge);
-    const width=canvas.clientWidth,height=canvas.clientHeight;
     if(canvas.width!==width || canvas.height!==height){canvas.width=width;canvas.height=height;}
     clear();
     if(!samples.length){report(message || 'No recent model data.');return;}

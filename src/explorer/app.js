@@ -34,7 +34,7 @@ function queueZoom(factor,point=null){
 }
 const focusCache=new Map();
 const elevation=new TerrainCache(), textures=new Map();
-let groups={},markers=[],buildingHits=[],cars=[],cpuFaces=[],animation=null;
+let groups={},markers=[],buildingHits=[],cars=[],cpuFaces=[],animation=null,renderedStreet=null;
 const colors={...THEMES.little};
 const fromGeo=point=>{const p=project(point);return new THREE.Vector3(p.x,0,p.z)};
 const vector=(x,y,z)=>new THREE.Vector3(x,y,z);
@@ -104,7 +104,7 @@ function textureFor(name){
 function group(name){const g=new THREE.Group();g.name=name;root.add(g);groups[name]=g;return g;}
 function tree(g,x,z,size=1,seed=0){if(sceneryVegetationArea({x,z}))return;const floor=groundY({x,z});box(g,'#887b51',x,floor+.1,z,.2*size,1.1*size,.2*size);cone(g,['#3f8356','#548e56','#609a5b','#408c65'][seed%4],x,floor+.75*size,z,.85*size,1.5*size,5);cone(g,'#76a966',x,floor+1.5*size,z,.6*size,1.1*size,5);}
 function palm(g,x,z,size=1){if(sceneryVegetationArea({x,z}))return;const floor=groundY({x,z});box(g,'#a48a61',x,floor+.1,z,.15*size,1.7*size,.15*size);for(let i=0;i<6;i++){const a=i*Math.PI/3;const dx=Math.cos(a),dz=Math.sin(a);tri(g,i%2?'#4b9577':'#378367',[x,floor+1.9*size,z],[x+dx*1.2*size-dz*.22*size,floor+1.5*size,z+dz*1.2*size+dx*.22*size],[x+dx*1.5*size,floor+1.3*size,z+dz*1.5*size]);}}
-function clearWorld(){sceneryKey='';markers.forEach(m=>m.el.remove());markers=[];cars=[];buildingHits=[];selectedBuilding=null;cpuFaces=[];root.traverse(o=>{o.geometry?.dispose();if(o.material)o.material.dispose()});root.clear();groups={};$('detail').hidden=true;}
+function clearWorld(){renderedStreet=null;sceneryKey='';markers.forEach(m=>m.el.remove());markers=[];cars=[];buildingHits=[];selectedBuilding=null;cpuFaces=[];root.traverse(o=>{o.geometry?.dispose();if(o.material)o.material.dispose()});root.clear();groups={};$('detail').hidden=true;}
 function inPolygon(p,poly){let inside=false;for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j];if(((a.z>p.z)!==(b.z>p.z))&&(p.x<(b.x-a.x)*(p.z-a.z)/(b.z-a.z)+a.x))inside=!inside;}return inside;}
 function heightMeters(value){
  if(value==null)return NaN;
@@ -364,6 +364,8 @@ function buildWorld(region,isOverview=false){clearWorld();if(region.id!=='free')
  if(trafficLines.length && !isOverview)drawTraffic();
  if(selectedRoad?.paths)drawSelectedRoad();
  if(software)collectFaces();dirty=true;
+ // Retain only the keys represented by this completed scene, never pending tiles.
+ renderedStreet=!isOverview&&region.id==='free'?region:null;
 }
 // Geometry is imported only on approach; scene resources are discarded on departure.
 let sceneryModule=null,sceneryLoading=null,sceneryKey='';
@@ -503,17 +505,25 @@ async function trackDetail(){
  }
  const [lon,lat]=unproject(p);
  const lod=software||v>65?'simple':'detailed';
- const key=keys.join(',')+':'+lod;if(roamKey===key)return;
+ const key=keys.join(',')+':'+lod;
+ // Rotation often requests a subset of the current padded footprint. Keep its
+ // meshes (and fresh terrain/style rebuilds) instead of rebuilding cached JSON.
+ if(renderedStreet?.simple===(lod==='simple')&&renderedStreet.tileKeys&&keys.every(k=>renderedStreet.tileKeys.has(k))){
+  if(streetRequest){streetRequest.abort();streetRequest=null;roamGeneration++;}
+  roamKey=key;return;
+ }
+ if(roamKey===key&&streetRequest&&!streetRequest.signal.aborted)return;
  streetRequest?.abort();streetRequest=new AbortController();
- const signal=streetRequest.signal;
+ const request=streetRequest,signal=request.signal;
  roamKey=key;const token=++roamGeneration;
  try{
-  const parts=await tileStore.read(keys,signal);if(token!==roamGeneration)return;
+  const parts=await tileStore.read(keys,signal);if(token!==roamGeneration||signal.aborted)return;
 
-  roamingRegion={id:'free',center:[lon,lat],roads:parts.flatMap(t=>t.roads),buildings:parts.flatMap(t=>t.buildings),parks:[],simple:lod==='simple'};
+  roamingRegion={id:'free',center:[lon,lat],roads:parts.flatMap(t=>t.roads),buildings:parts.flatMap(t=>t.buildings),parks:[],simple:lod==='simple',tileKeys:new Set(keys)};
   demActive=!!surface&&$('terrain-enabled').checked;setTerrainStatus(demActive?'Mapzen elevation · shared terrain':'Flat fallback · elevation off or unavailable');
   buildWorld(roamingRegion);freeLabel(false);
  }catch{if(token===roamGeneration&&!signal.aborted){roamKey='';$('world-status').textContent='Street data unavailable';lastCheck=performance.now()+3000;}}
+ finally{if(streetRequest===request)streetRequest=null;}
 }
 let searchLocation=null;
 let dismissSearch=()=>{};
@@ -659,14 +669,16 @@ function tick(time){requestAnimationFrame(tick);if(document.hidden)return;const 
   const h=groundY(controls.target),dy=(h-controls.target.y)*(1-Math.exp(-8*delta));
   controls.target.y+=dy;camera.position.y+=dy;if(Math.abs(dy)>.0001)dirty=true;
  }
- controls.update(delta);updateRoadHover(time);
+ controls.update(delta);
+ // Screen-space consumers run before renderer.render refreshes camera matrices.
+ camera.updateMatrixWorld();updateRoadHover(time);
  if(dirty||controls.autoRotate)updateRoadLocator();
  if(!animation&&time-lastCheck>160){lastCheck=time;trackDetail();updateScenery();updateTraffic();}
  if(groups.scenery)groups.scenery.visible=groups.nature?.visible??true;
  if(software&&time-lastRender<50)return;
  if(groups.traffic?.visible&&!overviewMode){for(const car of cars){let t=(time*.001*car.speed+car.offset)%1;const p=car.curve.getPoint(t),tangent=car.curve.getTangent(t);car.g.position.set(p.x+tangent.z*car.lane,0,p.z-tangent.x*car.lane);car.g.position.y=groundY(car.g.position)+.056;car.g.rotation.y=Math.atan2(tangent.x,tangent.z);}dirty=true;}
  animateScenery(time);
- drawWeather?.({time,camera,target:controls.target,wide:view()>450,ground:groundY});
+ drawWeather?.({time,camera,target:controls.target,wide:view()>450,ground:groundY,terrain:demActive?surface:null});
  if(dirty||controls.autoRotate){if(software)softwareRender();else renderer.render(scene,camera);updateLabels();dirty=false;}lastRender=time;
 }
 async function init(){try{

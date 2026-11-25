@@ -56,6 +56,14 @@ streaming terrain system; buildings and streets stream independently.
 
 The default entry uses `src/explorer/` and `public/explorer/`. To regenerate the street tiles from a Mauritius OSM extract with pyosmium installed, run `python scripts/build_street_tiles.py mauritius.osm.pbf public/explorer/tiles` into an empty output directory. The index records attribution and the input checksum. For a browser interaction check against the production preview, run `node scripts/check-explorer-browser.mjs` with a dedicated headless Chrome debugger on port 9238.
 
+Street geometry reuses the currently rendered tile footprint while the viewport
+stays inside it at the same detail level; it does not accumulate visited meshes.
+New coverage replaces that footprint, with at most four tile reads per request and
+48 decoded tiles cached. Terrain, style and height changes still rebuild the scene.
+Camera matrices refresh before screen-space overlays. Weather follows view changes
+on the next rendered frame while stationary animation retains its 80 ms cadence;
+reduced motion freezes the particles, not their map alignment.
+
 ## Classic explorer
 
 The previous map remains available at [classic.html](./classic.html). The controls and implementation notes below describe that version.
