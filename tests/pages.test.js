@@ -23,7 +23,7 @@ test('production assets and textures work under the GitHub Pages project path', 
       return seen;
     };
     const deferred = Object.entries(manifest).filter(([, chunk]) => chunk.isDynamicEntry);
-    for (const module of ['src/explorer/roads.js', 'src/explorer/scenery.js', 'node_modules/@mapbox/vector-tile/index.js', 'node_modules/pbf/index.js']) {
+    for (const module of ['src/explorer/roads.js', 'src/explorer/scenery.js', 'src/explorer/marine-controls.js', 'node_modules/@mapbox/vector-tile/index.js', 'node_modules/pbf/index.js']) {
       const entry = deferred.find(([key, chunk]) => key === module || chunk.src === module);
       assert.ok(entry, `${module} must be a real dynamic chunk`);
       for (const page of ['index.html', 'classic.html'])

@@ -4,7 +4,7 @@
 <aside class="explore-rail" aria-label="Search and place information">
 <section class="place-search" aria-label="Find roads and places in Mauritius"><form id="place-search-form" role="search"><label for="place-query">Explore anywhere</label><div class="search-row"><input id="place-query" type="search" placeholder="Road, town or landmark…" autocomplete="off" aria-controls="place-results"><button type="submit">Go</button></div></form><p id="search-status" role="status">Search a road by name and nearby town</p><ul id="place-results" hidden></ul></section>
 <section id="road-selection" aria-label="Selected road" hidden><div class="road-selection-heading"><span class="road-selection-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="m8 3-4 18m12-18 4 18M12 4v3m0 4v3m0 4v2"/></svg></span><div><strong id="road-selection-name"></strong><p id="road-selection-location"></p></div><button id="clear-road" type="button" aria-label="Clear selected road"><svg viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></div><p id="road-selection-status" role="status"></p><a id="road-source" target="_blank" rel="noopener">View OpenStreetMap source</a></section>
-<div class="region-card"><div class="eyebrow" id="region-tag">THE CAPITAL</div><h1 id="region-name">Port Louis<span>.</span></h1><p id="region-description">Harbour streets, colourful rooftops, and a city between the mountains and the sea.</p><div class="region-foot"><span class="flag"><i></i><i></i><i></i><i></i></span><span>MAURITIUS · INDIAN OCEAN</span></div></div>
+<div class="region-card"><div class="eyebrow" id="region-tag">THE CAPITAL</div><h1 id="region-name">Port Louis<span>.</span></h1><p id="region-description">Harbour streets, colourful rooftops, and a city between the mountains and the sea.</p><a id="marine-source" target="_blank" rel="noopener" hidden>View mapped marine feature on OpenStreetMap</a><div class="region-foot"><span class="flag"><i></i><i></i><i></i><i></i></span><span>MAURITIUS · INDIAN OCEAN</span></div></div>
 <div id="detail" hidden><button id="close-detail" aria-label="Close building information">×</button><div class="eyebrow">OPENSTREETMAP BUILDING</div><h2 id="building-name"></h2><p id="building-description"></p><button id="focus-building" type="button" class="focus-building">Zoom to this building</button><a id="building-link" target="_blank" rel="noopener">View source on OpenStreetMap ↗</a></div>
 </aside>
 <div class="right-tools" role="group" aria-label="Map view controls">
@@ -27,6 +27,13 @@
 <label class="layer-tile"><input type="checkbox" data-layer="traffic" checked><span>Simulated cars</span></label>
 <label class="layer-tile"><input type="checkbox" id="flow-enabled"><span>Mapbox traffic · centre tile</span></label>
 <label class="layer-tile"><input type="checkbox" id="labels-check" checked><span>Place labels</span></label>
+<label class="layer-tile"><input type="checkbox" id="marine-enabled"><span>Reefs &amp; lagoons</span></label>
+</div>
+<div id="marine-details" class="marine-details" hidden>
+<p id="marine-status" role="status"></p>
+<p class="marine-legend"><span class="reef-key">Mapped reefs</span><span class="lagoon-key">Mapped lagoons</span></p>
+<button id="marine-waves" type="button" aria-pressed="true">Pause waves</button>
+<p>Partial OSM coverage. Waves are illustrative, not live sea conditions. Search “coral reef”, “Blue Bay Riff” or “lagoon”. <a href="%BASE_URL%explorer/marine/index.json" download>Marine map data · ODbL</a></p>
 </div>
 <details class="traffic-token-settings"><summary>Mapbox public token</summary>
 <form id="traffic-token-form" autocomplete="off" novalidate>

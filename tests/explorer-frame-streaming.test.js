@@ -20,7 +20,7 @@ function streaming(){
   groups:{},selectedBuilding:null,renderedStreet:null,sceneryKey:'',current:emptyRegion,overviewMode:false,
   roamingRegion:null,streetRequest:null,roamKey:'',roamGeneration:0,demActive:false,demToken:0,surface:null,
   tileIndex:new Set(keys),terrainMeshes:null,roadTapVersion:0,roadPickPaths:[],selectedRoad:null,trafficLines:[],
-  data:{land:[],regions:[],mainRoads:[]},colors:{},software:false,dirty:false,lastCheck:0,
+  data:{land:[],regions:[],mainRoads:[]},colors:{},marineControls:null,themeId:'little',software:false,dirty:false,lastCheck:0,
   controls:{target:new THREE.Vector3()},view:()=>height,viewportKeys:()=>keys,unproject:()=>[57.5,-20.16],
   clearRoadHover(){},compile(){},freeLabel(){},setTerrainStatus(){},requestElevation(){},
   document:{querySelectorAll:()=>[]},
@@ -116,7 +116,7 @@ test('tick refreshes camera matrices before every screen-space consumer without 
   assert.ok(actual.distanceTo(expected)*1440<1e-6,name+' uses current matrices');observed.push(name);
  };
  const scope=createContext({camera,controls,requestAnimationFrame(){},document:{hidden:false},previousFrame:0,
-  motionTime:0,reducedMotion:{matches:false},followSun(){},animateCars(){},
+  motionTime:0,reducedMotion:{matches:false},marineControls:null,followSun(){},animateCars(){},
   animation:null,desiredView:null,held:new Set(),groundY:()=>0,dirty:true,lastCheck:Infinity,
   groups:{},scene:new THREE.Scene(),software:false,overviewMode:false,lastRender:0,demActive:false,surface:null,view:()=>40,
   updateRoadHover:()=>check('hover'),updateRoadLocator:()=>check('locator'),

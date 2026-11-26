@@ -5,7 +5,7 @@ import {readFileSync} from 'node:fs';
 const html=readFileSync(new URL('../index.html',import.meta.url),'utf8');
 const panel=html.split('<div id="layers-panel" hidden>')[1]?.split('<div id="flow-credit"')[0];
 
-test('layer tiles retain all eight native checkbox bindings and initial states',()=>{
+test('layer tiles retain existing bindings and add the opt-in marine layer',()=>{
   assert.ok(panel);
   const grid=panel.match(/<div class="layer-grid" role="group" aria-label="Map layers">([\s\S]*?)<\/div>/)?.[1];
   assert.ok(grid,'Layer choices have a named group');
@@ -19,8 +19,19 @@ test('layer tiles retain all eight native checkbox bindings and initial states',
     ['data-layer="traffic" checked','Simulated cars'],
     ['id="flow-enabled"','Mapbox traffic · centre tile'],
     ['id="labels-check" checked','Place labels'],
+    ['id="marine-enabled"','Reefs &amp; lagoons'],
   ]);
-  assert.equal((panel.match(/type="checkbox"/g)||[]).length,8);
+  assert.equal((panel.match(/type="checkbox"/g)||[]).length,9);
+});
+
+test('marine layer discloses partial mapping and illustrative, pausable waves',()=>{
+  assert.match(panel,/<div id="marine-details"[^>]*hidden>/);
+  assert.match(panel,/id="marine-status" role="status"/);
+  assert.match(panel,/<button id="marine-waves" type="button" aria-pressed="true">Pause waves<\/button>/);
+  assert.match(panel,/Partial OSM coverage/);
+  assert.match(panel,/illustrative, not live sea conditions/);
+  assert.match(panel,/href="%BASE_URL%explorer\/marine\/index.json"/);
+  assert.match(html,/id="marine-source"[^>]*hidden/);
 });
 
 test('layer metadata and full-width adjustment controls remain outside the tile grid',()=>{

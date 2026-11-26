@@ -42,6 +42,18 @@ const colors={...THEMES.little};
 const fromGeo=point=>{const p=project(point);return new THREE.Vector3(p.x,0,p.z)};
 const vector=(x,y,z)=>new THREE.Vector3(x,y,z);
 const root=new THREE.Group();scene.add(root);
+let marineControls=null,marineLoading=null;
+async function getMarineControls(){
+ if(marineControls)return marineControls;
+ marineLoading??=import('./marine-controls.js').then(({mountMarine})=>marineControls=mountMarine({
+  scene,software,ground:groundY,waterColor:()=>colors.water,toggle:$('marine-enabled'),details:$('marine-details'),status:$('marine-status'),waveButton:$('marine-waves'),
+  reducedMotion,url:assets+'marine/index.json',onChange(){if(software)collectFaces();dirty=true;},
+ }));
+ try{return await marineLoading;}catch(error){
+  marineLoading=null;$('marine-details').hidden=!$('marine-enabled').checked;$('marine-status').textContent='Marine layer unavailable. Toggle off and on to retry.';throw error;
+ }
+}
+function marineSource(place){$('marine-source').hidden=!place?.marine;if(place?.marine)$('marine-source').href=place.sourceUrl;}
 const carPoint=new THREE.Vector3(),carTangent=new THREE.Vector3(),sunShift=new THREE.Vector3();
 const raycaster=new THREE.Raycaster(),pointer=new THREE.Vector2();
 function seeded(n){let x=Math.sin(n*127.1+311.7)*43758.5453;return x-Math.floor(x)}
@@ -383,6 +395,7 @@ function buildWorld(region,isOverview=false){clearWorld();if(region.id!=='free')
  document.querySelectorAll('[data-layer]').forEach(input=>groups[input.dataset.layer].visible=input.checked);
  if(trafficLines.length && !isOverview)drawTraffic();
  if(selectedRoad?.paths)drawSelectedRoad();
+ marineControls?.refreshSurface(demActive+':'+themeId);
  if(software)collectFaces();dirty=true;
  // Retain only the keys represented by this completed scene, never pending tiles.
  renderedStreet=!isOverview&&region.id==='free'?region:null;
@@ -441,7 +454,7 @@ function animateScenery(time){
   dirty=true;
  }
 }
-function collectFaces(){cpuFaces=[];root.updateMatrixWorld(true);root.traverse(mesh=>{if(!mesh.isMesh)return;const a=mesh.geometry.attributes.position.array,base=new THREE.Color(mesh.userData.color||'#cccccc');for(let i=0;i<a.length;i+=9){let p1=vector(a[i],a[i+1],a[i+2]),p2=vector(a[i+3],a[i+4],a[i+5]),p3=vector(a[i+6],a[i+7],a[i+8]);const normal=p2.clone().sub(p1).cross(p3.clone().sub(p1)).normalize();const light=.76+.24*Math.abs(normal.dot(vector(-.4,.8,.3).normalize()));const c=base.clone().multiplyScalar(light);let layer=mesh;while(layer.parent&&layer.parent!==root)layer=layer.parent;const maxY=Math.max(p1.y,p2.y,p3.y);let order=6;if(layer.name==='land')order=mesh.userData.color===colors.land?0:mesh.userData.color===colors.shore?1:2;else if(layer.name==='roads')order=roadPass(mesh.userData.color,colors);else if(layer.name==='roadSelection')order=5.5;else if(layer.name==='nature'&&maxY<.09)order=2;cpuFaces.push({mesh,a:p1,b:p2,c:p3,color:'#'+c.getHexString(),order});}});}
+function collectFaces(){cpuFaces=[];root.updateMatrixWorld(true);[root,marineControls?.group].filter(Boolean).forEach(parent=>parent.traverse(mesh=>{if(!mesh.isMesh)return;const a=mesh.geometry.attributes.position.array,base=new THREE.Color(mesh.userData.color||'#cccccc');for(let i=0;i<a.length;i+=9){let p1=vector(a[i],a[i+1],a[i+2]),p2=vector(a[i+3],a[i+4],a[i+5]),p3=vector(a[i+6],a[i+7],a[i+8]);const normal=p2.clone().sub(p1).cross(p3.clone().sub(p1)).normalize();const light=.76+.24*Math.abs(normal.dot(vector(-.4,.8,.3).normalize()));const c=base.clone().multiplyScalar(light);let layer=mesh;while(layer.parent&&layer.parent!==root&&layer.parent!==scene)layer=layer.parent;const maxY=Math.max(p1.y,p2.y,p3.y);let order=6;if(layer.name==='marine')order=mesh.userData.marineOcean?-1:2;else if(layer.name==='land')order=mesh.userData.color===colors.land?0:mesh.userData.color===colors.shore?1:2;else if(layer.name==='roads')order=roadPass(mesh.userData.color,colors);else if(layer.name==='roadSelection')order=5.5;else if(layer.name==='nature'&&maxY<.09)order=2;cpuFaces.push({mesh,a:p1,b:p2,c:p3,color:'#'+c.getHexString(),order});}}));}
 function visible(o){for(let p=o;p;p=p.parent)if(!p.visible)return false;return true;}
 function softwareRender(){const ctx=renderer.ctx,w=host.clientWidth,h=host.clientHeight;ctx.setTransform(renderer.ratio,0,0,renderer.ratio,0,0);ctx.fillStyle=colors.water;ctx.fillRect(0,0,w,h);scene.updateMatrixWorld(true);camera.updateMatrixWorld();const vp=new THREE.Matrix4().multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse),cache=new Map(),list=[];for(const f of cpuFaces){if(!visible(f.mesh))continue;let matrix=cache.get(f.mesh);if(!matrix){matrix=new THREE.Matrix4().multiplyMatrices(vp,f.mesh.matrixWorld);cache.set(f.mesh,matrix)}const a=f.a.clone().applyMatrix4(matrix),b=f.b.clone().applyMatrix4(matrix),c=f.c.clone().applyMatrix4(matrix);if(Math.min(a.x,b.x,c.x)>1||Math.max(a.x,b.x,c.x)<-1||Math.min(a.y,b.y,c.y)>1||Math.max(a.y,b.y,c.y)<-1)continue;list.push({a,b,c,color:f.color,order:f.order,depth:(a.z+b.z+c.z)/3});}list.sort((a,b)=>a.order-b.order||b.depth-a.depth);for(const f of list){ctx.beginPath();ctx.moveTo((f.a.x+1)*w/2,(1-f.a.y)*h/2);ctx.lineTo((f.b.x+1)*w/2,(1-f.b.y)*h/2);ctx.lineTo((f.c.x+1)*w/2,(1-f.c.y)*h/2);ctx.closePath();ctx.fillStyle=f.color;ctx.fill();} }
 function updateLabels(){camera.updateMatrixWorld();for(const m of markers){let p=m.position.clone();p.y=p.y+.9;p.project(camera);m.el.style.left=((p.x+1)*host.clientWidth/2)+'px';m.el.style.top=((1-p.y)*host.clientHeight/2)+'px';m.el.hidden=!$('labels-check').checked||p.z>1||Math.abs(p.x)>1||Math.abs(p.y)>1;}}
@@ -467,7 +480,7 @@ function pose(target,world=false,animate=true,mode='close'){roadTapVersion++;if(
  const aspect=host.clientWidth/host.clientHeight;if(world)span=Math.min(MAX_VIEW,Math.max(span,6000/aspect));else if(aspect<.8)span*=1.3;
  resize();controls.minZoom=span/MAX_VIEW;controls.maxZoom=span/MIN_VIEW;desiredView=null;anchor=null;setView(animate?initial:span);
  const pos=target.clone().add(world?vector(1700,7000,3900):mode==='building'?vector(24,48,40):vector(90,170,130));if(animate){animation={initial,end:span,start:performance.now(),from:camera.position.clone(),to:pos,fromTarget:controls.target.clone(),toTarget:target};}else{camera.position.copy(pos);controls.target.copy(target);controls.update();}dirty=true;}
-function goRegion(id,animate=true){clearRoadSelection();dismissSearch();searchLocation=null;streetRequest?.abort();roamingRegion=null;roamGeneration++;roamKey='';const r=data.regions.find(r=>r.id===id);if(!r)return;demActive=false;buildWorld(r);$('region-tag').textContent=r.tag;$('region-name').innerHTML=r.name+'<span>.</span>';$('region-description').textContent=r.description;$('world-status').textContent='Building close-up · '+r.name;$('overview').classList.remove('active');document.querySelectorAll('.destination').forEach(b=>b.classList.toggle('active',b.dataset.region===id));pose(closeFocus(r),false,animate,'close');void requestElevation();}
+function goRegion(id,animate=true){clearRoadSelection();dismissSearch();searchLocation=null;marineSource(null);streetRequest?.abort();roamingRegion=null;roamGeneration++;roamKey='';const r=data.regions.find(r=>r.id===id);if(!r)return;demActive=false;buildWorld(r);$('region-tag').textContent=r.tag;$('region-name').innerHTML=r.name+'<span>.</span>';$('region-description').textContent=r.description;$('world-status').textContent='Building close-up · '+r.name;$('overview').classList.remove('active');document.querySelectorAll('.destination').forEach(b=>b.classList.toggle('active',b.dataset.region===id));pose(closeFocus(r),false,animate,'close');void requestElevation();}
 function showBuilding(entry){selectedBuilding=entry;$('detail').hidden=false;$('building-name').textContent=entry.b.name||'Island rooftop';$('building-description').textContent=`Footprint from OpenStreetMap. ${entry.known?'Height based on a mapped height or level count.':'Height is an illustration; no usable height was recorded.'} Shown at ${heightScale}× height. Colours and rooftop details are decorative.`;$('building-link').href=`https://www.openstreetmap.org/way/${entry.b.id}`;}
 function setTerrainStatus(text){$('terrain-status').textContent=text;}
 async function requestElevation(){
@@ -506,6 +519,7 @@ function viewportKeys(){
 }
 function localFrame(mode){pose(controls.target.clone(),false,true,mode);}
 function freeLabel(wide){
+ marineSource(searchLocation);
  const island=wide&&view()>450;
  $('region-tag').textContent=searchLocation?.kind??'FREE EXPLORATION';$('region-name').textContent=searchLocation?.name??'Mauritius.';
  $('region-description').textContent=searchLocation?.description??'WASD to travel. Point and scroll to explore anywhere on the island.';
@@ -569,7 +583,7 @@ function setupSearch(){
   clearRoadSelection();const place=result.item;
   searchLocation=place;streetRequest?.abort();roamGeneration++;roamKey='';roamingRegion=null;
   const target=fromGeo(place.center);target.y=groundY(target);
-  pose(target,false,!matchMedia('(prefers-reduced-motion: reduce)').matches,'close');if(place.scenery&&animation)animation.end=place.view??75;input.value=place.name;
+  pose(target,false,!matchMedia('(prefers-reduced-motion: reduce)').matches,'close');if(place.scenery&&animation)animation.end=place.view??75;if(place.marine){const marineView=place.view*Math.max(1,host.clientHeight/host.clientWidth);if(animation)animation.end=marineView;else setView(marineView);void getMarineControls().then(m=>m.setEnabled(true)).catch(()=>{});}marineSource(place);input.value=place.name;
   $('region-name').textContent=place.name;$('region-description').textContent=place.description??'Explore the surrounding streets and landscape with WASD or the mouse.';
   $('region-tag').textContent=place.kind;status.textContent='Exploring '+place.name;
  }
@@ -578,27 +592,42 @@ function setupSearch(){
   matches=[];results.replaceChildren();results.hidden=true;
   if(q.length<2){matches=[];results.replaceChildren();results.hidden=true;status.textContent='Type at least two characters';return;}
   document.body.classList.add('search-active');
-  const [placesOK,roadsOK]=await Promise.all([loadPlaces(),loadRoadData(true)]);
-  if(token!==queryVersion)return;
-  const placeMatches=placesOK?searchPlaces(places,q).slice(0,5).map(item=>({type:'place',item})):[];
+  let ready=false,marinePlaces=[],marineFailed=false,lastSignature=null;
+  function paint(){
+   if(!ready||token!==queryVersion)return;
+
+  const searchable=[...new Map([...(placesOK?places:[]),...(marinePlaces??[])].map(p=>[p.id,p])).values()];
+  const placeMatches=searchPlaces(searchable,q).slice(0,5).map(item=>({type:'place',item}));
   const roadMatches=roadsOK?roadModule.searchRoads(roadIndex.roads,q,6).map(item=>({type:'road',item})):[];
   const normalizeName=value=>value.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
   const query=normalizeName(q),rank=result=>{const name=normalizeName(result.item.name);return name===query?0:name.startsWith(query)?1:name.includes(query)?2:3;};
   matches=[...placeMatches,...roadMatches].sort((a,b)=>rank(a)-rank(b)).slice(0,8);
-  results.replaceChildren();results.hidden=!matches.length;
-  const unavailable=(!placesOK?'Place search unavailable. ':'')+(!roadsOK?'Road names unavailable. ':'');
+  const unavailable=(!placesOK?'Place search unavailable. ':'')+(!roadsOK?'Road names unavailable. ':'')+(marineFailed?'Marine places unavailable. ':'');
   status.textContent=unavailable+(matches.length?matches.length+' matching roads and places':roadsOK?'No mapped match. Try a road name and nearby town.':'Try focusing or typing again to retry.');
+  const signature=JSON.stringify(matches.map(r=>[r.type,r.item.id,r.item.kind,!!r.item.marine,r.item.name,r.item.locality]));
+  if(signature===lastSignature)return;lastSignature=signature;
+  const focused=results.contains(document.activeElement)?document.activeElement.dataset.resultKey:null;
+  results.replaceChildren();results.hidden=!matches.length;
   for(const result of matches){
    const item=result.item,li=document.createElement('li'),button=document.createElement('button');
-   button.type='button';button.className='search-result';button.dataset.resultType=result.type;
+   button.type='button';button.className='search-result';button.dataset.resultType=result.type;button.dataset.resultKey=result.type+':'+item.id;
    if(result.type==='road')button.dataset.roadId=item.id;
    const icon=document.createElementNS('http://www.w3.org/2000/svg','svg');icon.setAttribute('viewBox','0 0 24 24');icon.setAttribute('fill','none');icon.setAttribute('aria-hidden','true');
    const shape=document.createElementNS('http://www.w3.org/2000/svg','path');shape.setAttribute('d',result.type==='road'?'m8 3-4 18m12-18 4 18M12 4v3m0 4v3m0 4v2':'M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 1 1 14 0ZM15 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z');icon.append(shape);
    const copy=document.createElement('span'),name=document.createElement('strong'),location=document.createElement('small');name.textContent=item.name;
    let context=result.type==='road'?item.locality:item.kind+' · Place';
+   if(item.marine)context=item.kind+' · '+Math.abs(item.center[1]).toFixed(3)+'°S '+item.center[0].toFixed(3)+'°E · OSM '+item.id;
    if(result.type==='road'&&matches.filter(r=>r.type==='road'&&r.item.name===item.name&&r.item.locality===item.locality).length>1)context+=' · '+Math.abs(item.center[1]).toFixed(3)+'°S '+item.center[0].toFixed(3)+'°E · OSM '+item.wayIds[0];
    location.textContent=context;copy.append(name,location);button.append(icon,copy);button.onclick=()=>choose(result);li.append(button);results.append(li);
   }
+  if(focused)[...results.querySelectorAll('button')].find(b=>b.dataset.resultKey===focused)?.focus({preventScroll:true});
+  }
+  // Ordinary places/roads do not wait for an optional marine request. Late
+  // marine results merge only into the current query, preserving keyboard focus.
+  void getMarineControls().then(m=>m.loadPlaces()).then(value=>{marinePlaces=value;paint();})
+   .catch(()=>{marineFailed=true;paint();});
+  const [placesOK,roadsOK]=await Promise.all([loadPlaces(),loadRoadData(true)]);
+  ready=true;paint();
  }
  input.addEventListener('input',update);
  input.addEventListener('focus',async()=>{
@@ -642,7 +671,7 @@ function setupInteraction(){
  };
  $('clear-road').onclick=()=>{clearRoadSelection();$('search-status').textContent='Road selection cleared. Search another road or place.';};
  $('destinations').innerHTML=data.regions.map(r=>`<button class="destination" data-region="${r.id}"><span class="destination-icon">${r.icon}</span><span><strong>${r.name}</strong><small>${r.tag}</small></span></button>`).join('');document.querySelectorAll('.destination').forEach(b=>b.onclick=()=>goRegion(b.dataset.region));
- $('overview').onclick=()=>{clearRoadSelection();dismissSearch();streetRequest?.abort();roamingRegion=null;roamGeneration++;roamKey='';demActive=false;buildWorld(current,true);$('region-tag').textContent='ONE ISLAND. MANY LITTLE WORLDS.';$('region-name').innerHTML='Mauritius<span>.</span>';$('region-description').textContent='Point at any part of the island and scroll into its streets. This is the main island, shaped by OpenStreetMap.';$('world-status').textContent='The whole island';$('overview').classList.add('active');document.querySelectorAll('.destination').forEach(b=>b.classList.remove('active'));pose(fromGeo([57.565,-20.265]),true,true);void requestElevation();};
+ $('overview').onclick=()=>{clearRoadSelection();dismissSearch();searchLocation=null;marineSource(null);streetRequest?.abort();roamingRegion=null;roamGeneration++;roamKey='';demActive=false;buildWorld(current,true);$('region-tag').textContent='ONE ISLAND. MANY LITTLE WORLDS.';$('region-name').innerHTML='Mauritius<span>.</span>';$('region-description').textContent='Point at any part of the island and scroll into its streets. This is the main island, shaped by OpenStreetMap.';$('world-status').textContent='The whole island';$('overview').classList.add('active');document.querySelectorAll('.destination').forEach(b=>b.classList.remove('active'));pose(fromGeo([57.565,-20.265]),true,true);void requestElevation();};
  $('reset').onclick=()=>roamingRegion?localFrame('close'):pose(overviewMode?fromGeo([57.565,-20.265]):cameraMode==='district'?fromGeo(current.center):closeFocus(current),overviewMode,true,overviewMode?'overview':cameraMode==='district'?'district':'close');
  $('close-view').onclick=()=>{if(overviewMode||roamingRegion){localFrame('close');return;}pose(closeFocus(current),false,true,'close');$('world-status').textContent='Building close-up · '+current.name;};
  $('district-view').onclick=()=>{if(overviewMode||roamingRegion){localFrame('district');return;}pose(fromGeo(current.center),false,true,'district');$('world-status').textContent='District view · '+current.name;};
@@ -655,6 +684,7 @@ function setupInteraction(){
   (open?$('close-layers'):$('layers-button')).focus();
  };
  $('layers-button').onclick=()=>setLayers($('layers-panel').hidden);
+ $('marine-enabled').onchange=()=>{void getMarineControls().then(m=>m.setEnabled($('marine-enabled').checked)).catch(()=>{});};
  $('close-layers').onclick=()=>setLayers(false);
  document.querySelectorAll('[data-layer]').forEach(input=>input.onchange=()=>{groups[input.dataset.layer].visible=input.checked;dirty=true;});$('labels-check').onchange=()=>dirty=true;$('height').oninput=()=>{heightScale=+$('height').value;$('height-value').value=heightScale+'×';buildWorld(roamingRegion??current,overviewMode);dirty=true;};
  $('theme').onchange=()=>{themeId=$('theme').value;Object.assign(colors,THEMES[themeId]);scene.background.set(colors.water);buildWorld(roamingRegion??current,overviewMode);dirty=true;};
@@ -723,7 +753,7 @@ function tick(time){requestAnimationFrame(tick);if(document.hidden){previousFram
  if(!animation&&time-lastCheck>160){lastCheck=time;trackDetail();updateScenery();updateTraffic();}
  if(groups.scenery)groups.scenery.visible=groups.nature?.visible??true;
  if(software&&time-lastRender<50)return;
- animateCars(motionTime);animateScenery(motionTime);
+ animateCars(motionTime);animateScenery(motionTime);if(marineControls?.tick(motionTime*.001,view()))dirty=true;
  drawWeather?.({time,camera,target:controls.target,wide:view()>450,ground:groundY,terrain:demActive?surface:null});
  if(dirty||controls.autoRotate){if(software)softwareRender();else renderer.render(scene,camera);updateLabels();dirty=false;}lastRender=time;
 }
@@ -763,4 +793,4 @@ if(import.meta.hot){
 }
 
 // Supported smoke-test state, separate from geographic accuracy claims.
-window.__MU_TEST__=(includeRoadSamples=false)=>({roadIndexReady:!!roadIndex,roadCount:roadIndex?.roads.length??0,roadHover:roadHover?.id??null,roadSelection:selectedRoad?{id:selectedRoad.road.id,name:selectedRoad.road.name,ready:!!selectedRoad.paths,wayIds:selectedRoad.road.wayIds}:null,roadMeshes:groups.roadSelection?.children.length??0,roadGeometryBuckets:roadGeometryCache.size,roadSamples:includeRoadSamples&&roadIndex?screenRoads().flatMap(r=>r.points.slice(1).map((b,i)=>({wayId:r.wayId,id:roadsByWay.get(r.wayId)?.id,x:(r.points[i].x+b.x)/2,y:(r.points[i].y+b.y)/2}))).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)&&p.x>340&&p.x<host.clientWidth-90&&p.y>110&&p.y<host.clientHeight-170).slice(0,100):undefined,trafficKey,trafficLines:trafficLines.length,trafficMeshes:groups.flow?.children.length??0,trafficVertices:groups.flow?.children.reduce((n,m)=>n+m.geometry.attributes.position.count,0)??0,sceneryVisible:groups.scenery?.visible??false,scenery:groups.scenery?.userData.sites??[],sceneryMeshes:groups.scenery?.children.length??0,region:current?.id||null,overview:overviewMode,view:view(),target:controls?.target.toArray(),roamKey,cachedTiles:tileStore.cache.size,dem:demActive,theme:themeId,cameraMode,span,zoom:camera.zoom,focus:current?focusCache.get(current.id):null,buildingHits:buildingHits.length,roads:overviewMode?data.mainRoads.length:(roamingRegion??current)?.roads.length||0,software});
+window.__MU_TEST__=(includeRoadSamples=false)=>({roadIndexReady:!!roadIndex,roadCount:roadIndex?.roads.length??0,roadHover:roadHover?.id??null,roadSelection:selectedRoad?{id:selectedRoad.road.id,name:selectedRoad.road.name,ready:!!selectedRoad.paths,wayIds:selectedRoad.road.wayIds}:null,roadMeshes:groups.roadSelection?.children.length??0,roadGeometryBuckets:roadGeometryCache.size,roadSamples:includeRoadSamples&&roadIndex?screenRoads().flatMap(r=>r.points.slice(1).map((b,i)=>({wayId:r.wayId,id:roadsByWay.get(r.wayId)?.id,x:(r.points[i].x+b.x)/2,y:(r.points[i].y+b.y)/2}))).filter(p=>Number.isFinite(p.x)&&Number.isFinite(p.y)&&p.x>340&&p.x<host.clientWidth-90&&p.y>110&&p.y<host.clientHeight-170).slice(0,100):undefined,trafficKey,trafficLines:trafficLines.length,trafficMeshes:groups.flow?.children.length??0,trafficVertices:groups.flow?.children.reduce((n,m)=>n+m.geometry.attributes.position.count,0)??0,sceneryVisible:groups.scenery?.visible??false,scenery:groups.scenery?.userData.sites??[],sceneryMeshes:groups.scenery?.children.length??0,region:current?.id||null,overview:overviewMode,view:view(),target:controls?.target.toArray(),roamKey,cachedTiles:tileStore.cache.size,dem:demActive,theme:themeId,cameraMode,span,zoom:camera.zoom,focus:current?focusCache.get(current.id):null,buildingHits:buildingHits.length,roads:overviewMode?data.mainRoads.length:(roamingRegion??current)?.roads.length||0,software,marine:marineControls?.stats()??null});

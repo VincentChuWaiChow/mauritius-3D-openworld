@@ -29,7 +29,7 @@ function frames(){
   carPoint:new THREE.Vector3(),carTangent:new THREE.Vector3(),sunShift:new THREE.Vector3(),
   animation:null,desiredView:null,held:new Set(),groundY:()=>0,dirty:false,lastCheck:Infinity,
   groups:{traffic:{visible:true}},cars:[car],software:false,overviewMode:false,lastRender:0,
-  demActive:false,surface:null,view:()=>40,updateRoadHover(){},updateRoadLocator(){},
+  demActive:false,surface:null,marineControls:null,view:()=>40,updateRoadHover(){},updateRoadLocator(){},
   animateScenery:time=>times.push(time),drawWeather(){},updateLabels(){},
   renderer:{render:()=>{renders++;}},clearRoadHover(){},updateTraffic(){}});
  // New helpers are optional here so RED diagnoses original behavior, not missing names.

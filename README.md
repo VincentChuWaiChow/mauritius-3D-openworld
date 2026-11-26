@@ -205,6 +205,23 @@ five landmarks, search aliases, distant-scene removal, bounded tile cache, the
 Trees & parks toggle, flat fallback, and whole-island cleanup. It writes inspection
 screenshots to `/tmp/mu-<osm-id>.png`. This is not a native-GPU performance benchmark.
 
+## Reefs, lagoons and illustrative waves
+
+Enable **Layers & Style → Reefs & lagoons** for the mapped marine layer. It contains
+29 reef features (11 tagged as coral in OSM) and 10 lagoons from a dated, attributed
+OSM snapshot. Coverage is partial; untyped reefs are not presented as verified
+coral habitat. Search **coral reef**, **reef**, **Blue Bay Riff**, **Paquet Bay** or
+**lagoon** to frame a mapped feature and open its original OSM source link.
+
+Marine code/data load only on layer or search intent. Wave animation is stylised,
+not live ocean conditions, navigation advice or a surf forecast. **Pause waves**
+freezes the crests; reduced-motion and software-renderer views stay static. The
+existing foreground frame loop is reused, with stable buffers and no new textures
+or reflection passes. Turning the layer off disposes its scene resources.
+
+See [marine provenance and offline rebuild](public/explorer/marine/README.md) for
+the source query, license, known geometry warning and exact retained boundaries.
+
 ## Road discovery in the main explorer
 
 Search a road name and nearby town, for example **Royal Road Pointe aux Piments**.

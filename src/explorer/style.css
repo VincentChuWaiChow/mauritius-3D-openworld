@@ -166,6 +166,16 @@ header,footer,.region-card,.right-tools,#layers-panel,#detail,.credits,.place-se
 .traffic-token-entry button{min-height:44px;padding:8px 12px;background:var(--green);color:white;border-radius:8px;font:inherit;font-weight:600}
 .traffic-token-entry #clear-traffic-token{background:#e7efe4;color:var(--ink)}
 #layers-panel .traffic-token-settings :focus-visible{outline:2px solid var(--green);outline-offset:2px}
+.marine-details{margin-top:12px;padding-top:12px;border-top:1px solid #d7e3d9;font-size:12px;line-height:1.45;color:#365e4f}
+.marine-details p{margin:6px 0;overflow-wrap:anywhere}
+.marine-details a,#marine-source{color:#175b45;text-underline-offset:3px}
+.marine-legend{display:flex;flex-wrap:wrap;gap:12px}
+.marine-legend span{display:inline-flex;align-items:center;gap:6px}
+.marine-legend span::before{content:"";width:12px;height:12px;background:#bd8f91;border:1px solid #805c62}
+.marine-legend .lagoon-key::before{background:#58b9b6;border-color:#427f79}
+#marine-waves{min-height:44px;padding:8px 12px;border-radius:8px;background:#e7f1e7;color:var(--ink);font:inherit;font-weight:600}
+#marine-waves:disabled{cursor:default}
+#marine-source{display:inline-block;pointer-events:auto;font-size:12px;line-height:1.5;margin-top:8px}
 
 /* Map first: usable controls at the edges, with one explicit settings exit. */
 .right-tools > button{width:44px;height:44px;display:grid;place-items:center}

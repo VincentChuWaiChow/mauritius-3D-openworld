@@ -87,10 +87,10 @@ try{
         columns:getComputedStyle(grid).gridTemplateColumns,metadataFont:parseFloat(getComputedStyle(p.querySelector('.layer-details')).fontSize),
         checkboxes:p.querySelectorAll('input[type=checkbox]').length};
     })()`);
-    assert.equal(layout.checkboxes,8);
+    assert.equal(layout.checkboxes,9);
     const columns=width>=480?3:2;
     assert.equal(layout.columns.split(' ').length,columns,JSON.stringify(layout));
-    assert.equal(new Set(layout.tiles.map(t=>Math.round(t.y))).size,Math.ceil(8/columns));
+    assert.equal(new Set(layout.tiles.map(t=>Math.round(t.y))).size,Math.ceil(9/columns));
     assert.equal(layout.overflow,false,'panel/page horizontal overflow');
     assert.ok(layout.panel.x>=0&&layout.panel.right<=width+1&&layout.panel.y>=0&&layout.panel.bottom<=height+1,JSON.stringify(layout.panel));
     assert.ok(layout.panel.height<=Math.ceil(layout.requiredHeight)+1,'Panel must hug its content instead of stretching to the viewport: '+JSON.stringify({width,height,actual:layout.panel.height,required:layout.requiredHeight}));
